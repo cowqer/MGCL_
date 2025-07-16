@@ -116,8 +116,8 @@ if __name__ == '__main__':
     # 2023-11-03 14:01:02 iou: [0.3375, 0.4660, 0.4952, 0.5550, 0.2850]
     # 2023-10-24 10:04:32 fold=0, shot=5, mIoU: 49.13707733154297 FB-IoU: 66.159912109375
     args = my_parser(fold=2, shot=5, backbone='resnet50', benchmark="dlrsd",
-                     use_gpu=True, gpu_id=0, bsz=32, mask=True, mask_num=128,
-                     load='./logs/logs/07-15_dlrsd_shot1_fold0.log/best_model.pt')
+                     use_gpu=True, gpu_id=0, bsz=38, mask=True, mask_num=128,
+                     load='./logs/dlrsd1_6_27.log/best_model.pt')
     # 2023-10-24 09:57:40 fold=1, shot=1, mIoU: 30.592941284179688 FB-IoU: 55.60072708129883
     # 2023-11-03 14:01:54 iou: [0.3214, 0.4551, 0.3579, 0.1319, 0.2634]
     # 2023-10-24 10:06:42 fold=1, shot=5, mIoU: 32.57774353027344 FB-IoU: 57.06192398071289

@@ -31,7 +31,7 @@ class Config(object):
     data_sam_mask_name = "sam_mask_{}_t{}_p{}_s{}".format(
             model_type, target_size, points_per_side, int(stability_score_thresh * 100))
     # need to download from https://github.com/facebookresearch/segment-anything#model-checkpoints
-    pretrain_checkpoint = "./segment-anything-main/checkpoints/sam_vit_h_4b8939.pth"
+    pretrain_checkpoint = "../segment-anything-main/checkpoints/sam_vit_h_4b8939.pth"
     pass
 
     @staticmethod

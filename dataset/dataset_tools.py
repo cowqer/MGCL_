@@ -250,7 +250,7 @@ class DatasetDLRSD(Dataset):
 
         self.img_path = os.path.join(datapath, 'Images')
         self.ann_path = os.path.join(datapath, 'Labels')
-        self.pkl_path = os.path.join(datapath, 'sam_mask_vit_h_t64_p32_s50')
+        self.pkl_path = os.path.join(datapath, 'sam_mask_vit_h_t64_p16_s50')
 
         self.transform = transform
         self.class_ids = self.build_class_ids()

@@ -94,7 +94,7 @@ class Runner(object):
                 batch['support_labels'].squeeze(1),
                 query_mask=batch['query_mask'] if 'query_mask' in batch else None,
                 support_masks=batch['support_masks'].squeeze(1) if 'support_masks' in batch else None)
-            loss = loss
+
             # 2. Compute loss & update model parameters
             if hasattr(self.model, "module"):
                 loss = self.model.module.compute_objective(logit, batch['query_label'])
@@ -105,7 +105,7 @@ class Runner(object):
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
-
+        
             # 3. Evaluate prediction
             pred = logit.argmax(dim=1)
             area_inter, area_union = Evaluator.classify_prediction(pred, batch)
@@ -153,10 +153,10 @@ def my_parser():
     args = parser.parse_args()
 
 # 生成日期
-    date_str = datetime.datetime.now().strftime("%m-%d")
-
+    # date_str = datetime.datetime.now().strftime("%m-%d")
+    date_str = datetime.datetime.now().strftime("%m-%d_%H-%M")
 # 自动生成 log 文件夹名
-    args.logpath = f"logs/{date_str}_{args.benchmark}_shot{1}_fold{args.fold}"
+    args.logpath = f"{date_str}_{args.benchmark}_shot{1}_fold{args.fold}"
     
     Logger.initialize(args, training=True)
     return args

@@ -13,7 +13,7 @@ from alisuretool.Tools import Tools
 from torch.utils.data import Dataset
 from torchvision.models import resnet
 from torch.utils.data import DataLoader
-from net.net_tools import MGCLNetwork
+from net.net_tools1 import MGCLNetwork
 from util.util_tools import MyCommon, MyOptim, AverageMeter, Logger
 from dataset.dataset_tools import FSSDataset, Evaluator, DatasetISAID
 
@@ -89,20 +89,11 @@ class Runner(object):
             # 1. forward pass
             batch = MyCommon.to_cuda(batch, device=self.device)
 
-            # ====== NEW: reshape support dims ======
-            B, shot, C, H, W = batch['support_imgs'].shape
-            support_imgs = batch['support_imgs'].view(B * shot, C, H, W)
-            support_labels = batch['support_labels'].view(B * shot, 1, H, W)
-            support_masks = batch['support_masks'].view(B * shot, batch['support_masks'].shape[2], H, W)
-            # =======================================
-
             logit = self.model(
-                batch['query_img'],
-                support_imgs,
-                support_labels,
+                batch['query_img'], batch['support_imgs'].squeeze(1),
+                batch['support_labels'].squeeze(1),
                 query_mask=batch['query_mask'] if 'query_mask' in batch else None,
-                support_masks=support_masks if 'support_masks' in batch else None
-            )
+                support_masks=batch['support_masks'].squeeze(1) if 'support_masks' in batch else None)
 
             # 2. Compute loss & update model parameters
             if hasattr(self.model, "module"):
@@ -114,7 +105,7 @@ class Runner(object):
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
-
+        
             # 3. Evaluate prediction
             pred = logit.argmax(dim=1)
             area_inter, area_union = Evaluator.classify_prediction(pred, batch)
@@ -146,7 +137,7 @@ def my_parser():
     parser.add_argument('--mask_num', type=int, default=128)
     parser.add_argument('--datapath', type=str,
                         default='/data/seekyou/Data/DLRSD')
-    parser.add_argument('--shot', type=int, default=1, help='number of support shots')
+    # parser.add_argument('--shot', type=int, default=1, help='number of support shots')
     parser.add_argument('--benchmark', type=str, default='dlrsd', choices=['isaid', 'dlrsd'])
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--power', type=float, default=0.9)
@@ -165,7 +156,7 @@ def my_parser():
     date_str = datetime.datetime.now().strftime("%m-%d")
 
 # 自动生成 log 文件夹名
-    args.logpath = f"logs/{date_str}_{args.benchmark}_shot{args.shot}_fold{args.fold}"
+    args.logpath = f"logs/{date_str}_{args.benchmark}_shot{1}_fold{args.fold}"
     
     Logger.initialize(args, training=True)
     return args
