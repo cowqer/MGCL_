@@ -24,7 +24,7 @@ def compare_label_png_and_pkl(png_path, pkl_path):
 
 # 示例调用，替换为你自己的文件路径
 png_label_path = "/data/seekyou/Data/DLRSD_split/train/Labels/agricultural00.png"
-pkl_label_path = "/data/seekyou/Data/DLRSD_split/train/sam_mask_vit_h_t64_p16_s50/agricultural00.pkl"
+pkl_label_path = "/data/seekyou/Data/DLRSD_split/train/sam_mask_vit_h_t64_p32_s50/agricultural00.pkl"
 
 compare_label_png_and_pkl(png_label_path, pkl_label_path)
 

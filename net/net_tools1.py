@@ -175,12 +175,10 @@ class SegmentationHead(nn.Module):
 
     def forward(self, query_feats, support_feats, support_label, query_mask, support_masks):
         # MGFE
-        # print("query_feats shapes:", [f.shape for f in query_feats])
-        # print("support_feats shapes:", [f.shape for f in support_feats])
+
         _query_feats, _support_feats = MGAModule.update_feature(
             query_feats, support_feats, query_mask, support_masks)
-        # print("_query_feats shapes:", [f.shape for f in _query_feats])
-        # print("_support_feats shapes:", [f.shape for f in _support_feats])
+
         query_feats = [torch.concat([one, two], dim=1) for one, two in zip(query_feats, _query_feats)]
         support_feats = [torch.concat([one, two], dim=1) for one, two in zip(support_feats, _support_feats)]
 

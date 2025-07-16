@@ -22,7 +22,109 @@ import PIL.Image as Image
 import torchvision.transforms.v2 as transforms2
 from torch.utils.data import Dataset
 
+#######################7.16
+class MGAModule(object):
 
+    @classmethod
+    def update_feature_one(cls, query_feat, query_mask):
+        '''
+        给一个特征和mask，输出「增强」后的特征。
+        '''
+        return cls.enabled_feature([query_feat], query_mask)[0]
+
+    @classmethod
+    def update_feature(cls, query_feats, support_feats, query_mask, support_masks):
+        '''
+        给一组特征和mask，输出「增强」后的特征。
+        '''
+        query_feats = cls.enabled_feature(query_feats, query_mask)
+        support_feats = cls.enabled_feature(support_feats, support_masks)
+        return query_feats, support_feats
+
+    @classmethod
+    def enabled_feature(cls, feats, masks):
+        """
+        - feats: list of tensors of shape (b, c, h, w)
+        - masks: (b, m, h, w)
+        """
+        # ① 先用最后一层算全局的 attention map
+        last_feat = feats[-1]
+        attention_map = cls.compute_attention_map(last_feat, masks)  # (b, 1, H, W)
+
+        enabled_feats = []
+        for feat in feats:
+            # 插值对齐特征尺寸
+            att_resized = F.interpolate(attention_map, size=feat.shape[-2:], mode='bilinear', align_corners=False)
+            enhanced_feat = feat * (att_resized + 1.0)  # +1 是保留原始特征，避免过强抑制
+            enabled_feats.append(enhanced_feat)
+
+        return enabled_feats
+
+    @classmethod
+    def compute_attention_map(cls, feat, masks):
+        """
+        给最后一层特征和mask，返回一个判别性的 attention map
+        - feat: (b, c, h, w)
+        - masks: (b, m, h_mask, w_mask)
+        return: (b, 1, h, w)
+        """
+        b, m, h_mask, w_mask = masks.shape
+        _, c, h, w = feat.shape
+
+        # 构造 one-hot 掩码 (b, m, h_mask, w_mask)
+        index_mask = torch.zeros_like(masks[:, 0]).long() + m  # default class
+        for i in range(m):
+            index_mask[masks[:, i] == 1] = i
+        masks_onehot = F.one_hot(index_mask, num_classes=m+1).permute(0, 3, 1, 2)[:, :m]
+
+        # 插值 mask 到 feat 空间尺寸
+        target_masks = F.interpolate(masks_onehot.float(), size=(h, w), mode='nearest')
+
+        # 提取 prototype
+        prototypes = cls.my_masked_average_pooling(feat, target_masks)  # (b, c, m)
+
+        # Cosine 相似度
+        feat_flat = feat.view(b, c, -1)  # (b, c, hw)
+        feat_norm = F.normalize(feat_flat, dim=1)  # (b, c, hw)
+        proto_norm = F.normalize(prototypes, dim=1)  # (b, c, m)
+        sim_map = torch.bmm(proto_norm.transpose(1, 2), feat_norm)  # (b, m, hw)
+        sim_map = sim_map.view(b, m, h, w)
+
+        # 归一化
+        sim_map = sim_map.view(b * m, -1)
+        sim_map = (sim_map - sim_map.min(dim=1, keepdim=True)[0]) / \
+                  (sim_map.max(dim=1, keepdim=True)[0] - sim_map.min(dim=1, keepdim=True)[0] + 1e-8)
+        sim_map = sim_map.view(b, m, h, w)
+
+        # 判别图（FG - BG）
+        if m >= 2:
+            att_fg = sim_map[:, 0:1]
+            att_bg = sim_map[:, 1:2]
+            disc_att = F.relu(att_fg - att_bg)  # 判别 attention
+            return disc_att  # (b, 1, h, w)
+        else:
+            return sim_map  # (b, m, h, w)
+
+    @staticmethod
+    def my_masked_average_pooling(feature, mask):
+        '''
+        - feature: (b, c, h, w)
+        - mask: (b, m, h, w)
+        return: (b, c, m)
+        '''
+        b, c, h, w = feature.shape
+        _, m, _, _ = mask.shape
+
+        feature = feature.view(b, c, -1)  # (b, c, hw)
+        mask = mask.view(b, m, -1)        # (b, m, hw)
+
+        mask_sum = mask.sum(dim=2, keepdim=True) + 1e-8
+        pooled = torch.bmm(feature, mask.transpose(1, 2)) / mask_sum.transpose(1, 2)  # (b, c, m)
+
+        return pooled  # (b, c, m)
+
+
+##########################
 class CenterPivotConv4d(nn.Module):
     r""" CenterPivot 4D conv"""
     def __init__(self, in_channels, out_channels, kernel_size, stride, padding, bias=True):
@@ -148,7 +250,7 @@ class MGCDModule(nn.Module):
         hypercorr_encoded = hypercorr_mix432.view(bsz, ch, ha, wa, -1).mean(dim=-1)
 
         if query_mask is not None:
-            # MGFE
+
             _hypercorr_encoded = MGFEModule.update_feature_one(hypercorr_encoded, query_mask)
             hypercorr_encoded = torch.concat([hypercorr_encoded, _hypercorr_encoded], dim=1)
         else:
@@ -396,3 +498,42 @@ class MGCLNetwork(nn.Module):
 
     pass
 
+class SegmentationHead_MGA(SegmentationHead):
+    """
+    SegmentationHead_MGA is a subclass of SegmentationHead that implements the Multi-Granularity Attention mechanism.
+    It uses the same backbone and segmentation head but focuses on multi-granularity attention mechanisms.
+    """
+    def forward(self, query_feats, support_feats, support_label, query_mask, support_masks):
+        # MGFE
+        _query_feats, _support_feats = MGAModule.update_feature(
+            query_feats, support_feats, query_mask, support_masks)
+        query_feats = [torch.concat([one, two], dim=1) for one, two in zip(query_feats, _query_feats)]
+        support_feats = [torch.concat([one, two], dim=1) for one, two in zip(support_feats, _support_feats)]
+
+        # FBC
+        support_feats_fg = [self.label_feature(
+            support_feat, support_label.clone())for support_feat in support_feats]
+        support_feats_bg = [self.label_feature(
+            support_feat, (1 - support_label).clone())for support_feat in support_feats]
+        corr_fg = self.multilayer_correlation(query_feats, support_feats_fg)
+        corr_bg = self.multilayer_correlation(query_feats, support_feats_bg)
+        corr = [torch.concatenate([fg_one[:, None], bg_one[:, None]],
+                                  dim=1) for fg_one, bg_one in zip(corr_fg, corr_bg)]
+
+        # MGCD
+        logit = self.mgcd(corr[::-1], query_mask)
+        return logit
+
+    # Additional methods specific to MGA can be added here
+
+class MGANetwork(MGCLNetwork):
+    """
+    MGANet is a subclass of MGCLNetwork that implements the Multi-Granularity Attention Network.
+    It uses the same backbone and segmentation head but focuses on multi-granularity attention mechanisms.
+    """
+    def __init__(self, args, use_original_imgsize):
+        super().__init__(args, use_original_imgsize)
+        self.segmentation_head = SegmentationHead()  # Reuse SegmentationHead for MGANet
+        pass
+
+    # Additional methods specific to MGANet can be added here

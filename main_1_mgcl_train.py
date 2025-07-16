@@ -13,18 +13,20 @@ from alisuretool.Tools import Tools
 from torch.utils.data import Dataset
 from torchvision.models import resnet
 from torch.utils.data import DataLoader
-from net.net_tools import MGCLNetwork
+# from net.net_tools import MGCLNetwork
+from net import net_tools
 from util.util_tools import MyCommon, MyOptim, AverageMeter, Logger
 from dataset.dataset_tools import FSSDataset, Evaluator, DatasetISAID
-
+import yaml
 
 class Runner(object):
 
     def __init__(self, args):
         self.args = args
         self.device = MyCommon.gpu_setup(use_gpu=True, gpu_id=args.gpuid)
-
-        self.model = MGCLNetwork(args, False).to(self.device)
+        NetClass = getattr(net_tools, args.net_name)
+        self.model = NetClass(args, False).to(self.device)
+        # self.model = MGCLNetwork(args, False).to(self.device)
         if self.args.backbone == "resnet101":
             self.model = nn.DataParallel(self.model)
             pass
@@ -121,43 +123,24 @@ class Runner(object):
         return avg_loss, miou, fb_iou
 
 
-
+import datetime
 def my_parser():
-    # Arguments parsing
-    parser = argparse.ArgumentParser(description='MGCL Pytorch Implementation')
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--config', type=str, default='./Config/config0.yaml', help='配置文件路径')
+    args_cmd = parser.parse_args()
 
-    parser.add_argument('--logpath', type=str, default='demo')
-    parser.add_argument('--gpuid', type=int, default=0)
-    parser.add_argument('--bsz', type=int, default=16)
-    parser.add_argument('--fold', type=int, default=0, choices=[0, 1, 2])
-    parser.add_argument('--backbone', type=str, default='resnet50',
-                        choices=['vgg16', 'resnet50', 'resnet101'])
-    parser.add_argument("--finetune_backbone", type=bool, default=True)
-    parser.add_argument('--mask', type=bool, default=True)
-    parser.add_argument('--mask_num', type=int, default=128)
-    parser.add_argument('--datapath', type=str,
-                        default='/data/seekyou/Data/DLRSD')
-    # parser.add_argument('--shot', type=int, default=1, help='number of support shots')
-    parser.add_argument('--benchmark', type=str, default='dlrsd', choices=['isaid', 'dlrsd'])
-    parser.add_argument('--lr', type=float, default=1e-3)
-    parser.add_argument('--power', type=float, default=0.9)
-    parser.add_argument('--niter', type=int, default=100)
-    parser.add_argument('--max_steps', type=int, default=200000)
-    parser.add_argument('--nworker', type=int, default=8)
-    parser.add_argument('--img_size', type=int, default=256)
-    parser.add_argument('--use_original_imgsize', type=bool, default=False)
-    args = parser.parse_args()
-    import datetime
+    with open(args_cmd.config, 'r') as f:
+        cfg = yaml.safe_load(f)
+    class Args:
+        pass
+    args = Args()
+    for k, v in cfg.items():
+        setattr(args, k, v)
 
-# 解析完参数
-    args = parser.parse_args()
-
-# 生成日期
-    # date_str = datetime.datetime.now().strftime("%m-%d")
     date_str = datetime.datetime.now().strftime("%m-%d_%H-%M")
-# 自动生成 log 文件夹名
-    args.logpath = f"{date_str}_{args.benchmark}_shot{1}_fold{args.fold}"
-    
+    # 提取config文件名（不带路径和扩展名）
+    config_base = os.path.splitext(os.path.basename(args_cmd.config))[0]
+    args.logpath = f"{date_str}_{config_base}_{args.benchmark}_shot{1}_fold{args.fold}"
     Logger.initialize(args, training=True)
     return args
 
