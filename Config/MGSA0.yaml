@@ -1,0 +1,19 @@
+# filepath: /data/seekyou/Algos/MGCL/config.yaml
+logpath: demo
+gpuid: 0
+bsz: 16
+fold: 0
+backbone: resnet50
+finetune_backbone: true
+mask: true
+mask_num: 128
+datapath: /data/seekyou/Data/DLRSD
+benchmark: dlrsd
+lr: 0.001
+power: 0.9
+niter: 100
+max_steps: 200000
+nworker: 8
+img_size: 256
+use_original_imgsize: false
+net_name: MGSANetwork

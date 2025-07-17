@@ -22,7 +22,7 @@ import PIL.Image as Image
 import torchvision.transforms.v2 as transforms2
 from torch.utils.data import Dataset
 
-#######################7.16
+#######################7.15
 class MGAModule(object):
 
     @classmethod
@@ -124,7 +124,9 @@ class MGAModule(object):
         return pooled  # (b, c, m)
 
 
-##########################
+##########################7.16
+# class MGSAModule(object):
+
 class CenterPivotConv4d(nn.Module):
     r""" CenterPivot 4D conv"""
     def __init__(self, in_channels, out_channels, kernel_size, stride, padding, bias=True):
@@ -523,9 +525,74 @@ class SegmentationHead_MGA(SegmentationHead):
         # MGCD
         logit = self.mgcd(corr[::-1], query_mask)
         return logit
+    
+class CrossAttention(nn.Module):
+    def __init__(self, in_channels):
+        super().__init__()
+        self.query_proj = nn.Conv2d(in_channels, in_channels, 1)
+        self.key_proj = nn.Conv2d(in_channels, in_channels, 1)
+        self.value_proj = nn.Conv2d(in_channels, in_channels, 1)
+        self.softmax = nn.Softmax(dim=-1)
+
+    def forward(self, query, support):
+        B, C, H, W = query.shape
+
+        Q = self.query_proj(query).view(B, C, -1)  # B x C x HW
+        K = self.key_proj(support).view(B, C, -1)
+        V = self.value_proj(support).view(B, C, -1)
+
+        attn = torch.bmm(Q.transpose(1, 2), K) / (C ** 0.5)  # B x HW_q x HW_s
+        attn = self.softmax(attn)
+
+        out = torch.bmm(attn, V.transpose(1, 2))  # B x HW_q x C
+        out = out.transpose(1, 2).view(B, C, H, W)
+        return out + query
 
     # Additional methods specific to MGA can be added here
+class SegmentationHead_MGA(SegmentationHead):
+    def forward(self, query_feats, support_feats, support_label, query_mask, support_masks):
+        # MGFE
+        _query_feats, _support_feats = MGFEModule.update_feature(
+            query_feats, support_feats, query_mask, support_masks)
+        query_feats = [torch.concat([one, two], dim=1) for one, two in zip(query_feats, _query_feats)]
+        support_feats = [torch.concat([one, two], dim=1) for one, two in zip(support_feats, _support_feats)]
 
+        # FBC
+        support_feats_fg = [self.label_feature(
+            support_feat, support_label.clone())for support_feat in support_feats]
+        support_feats_bg = [self.label_feature(
+            support_feat, (1 - support_label).clone())for support_feat in support_feats]
+        corr_fg = self.multilayer_correlation(query_feats, support_feats_fg)
+        corr_bg = self.multilayer_correlation(query_feats, support_feats_bg)
+        corr = [torch.concatenate([fg_one[:, None], bg_one[:, None]],
+                                  dim=1) for fg_one, bg_one in zip(corr_fg, corr_bg)]
+
+        # MGCD
+        logit = self.mgcd(corr[::-1], query_mask)
+        return logit
+    
+class SegmentationHead_MGSA(SegmentationHead):
+    def forward(self, query_feats, support_feats, support_label, query_mask, support_masks):
+        # MGFE
+        _query_feats, _support_feats = MGFEModule.update_feature(
+        query_feats, support_feats, query_mask, support_masks)
+        query_feats = [torch.concat([one, two], dim=1) for one, two in zip(query_feats, _query_feats)]
+        support_feats = [torch.concat([one, two], dim=1) for one, two in zip(support_feats, _support_feats)]
+
+        # FBC
+        support_feats_fg = [self.label_feature(
+            support_feat, support_label.clone())for support_feat in support_feats]
+        support_feats_bg = [self.label_feature(
+            support_feat, (1 - support_label).clone())for support_feat in support_feats]
+        corr_fg = self.multilayer_correlation(query_feats, support_feats_fg)
+        corr_bg = self.multilayer_correlation(query_feats, support_feats_bg)
+        corr = [torch.concatenate([fg_one[:, None], bg_one[:, None]],
+                                  dim=1) for fg_one, bg_one in zip(corr_fg, corr_bg)]
+
+        # MGCD
+        logit = self.mgcd(corr[::-1], query_mask)
+        return logit
+    
 class MGANetwork(MGCLNetwork):
     """
     MGANet is a subclass of MGCLNetwork that implements the Multi-Granularity Attention Network.
