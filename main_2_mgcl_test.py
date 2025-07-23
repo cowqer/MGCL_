@@ -1,21 +1,9 @@
-import os
 import torch
-import pickle
-import random
 import argparse
-import numpy as np
-import torch.nn as nn
-import PIL.Image as Image
-import torch.optim as optim
-import torch.nn.functional as F
-from torchvision.models import vgg
 from alisuretool.Tools import Tools
-from torch.utils.data import Dataset
-from torchvision.models import resnet
-from torch.utils.data import DataLoader
 from net.net_tools import MGCLNetwork
-from util.util_tools import MyCommon, MyOptim, AverageMeter, Logger
-from dataset.dataset_tools import FSSDataset, Evaluator, DatasetISAID
+from util.util_tools import MyCommon, AverageMeter, Logger
+from dataset.dataset_tools import FSSDataset, Evaluator
 
 
 class Runner(object):
@@ -24,15 +12,14 @@ class Runner(object):
         self.args = args
         self.device = MyCommon.gpu_setup(use_gpu=self.args.use_gpu, gpu_id=args.gpuid)
 
-        self.model = MGCLNetwork(args, False).to(self.device)
+        self.model = MGCLNetwork(args).to(self.device)
         self.model.eval()
         weights = torch.load(args.load, map_location=None if self.args.use_gpu else torch.device('cpu'))
         weights = {one.replace("module.", ""): weights[one] for one in weights.keys()}
         weights = {one.replace("hpn_learner.", "mgcd."): weights[one] for one in weights.keys()}
         self.model.load_state_dict(weights)
 
-        FSSDataset.initialize(img_size=args.img_size, datapath=args.datapath,
-                              use_original_imgsize=args.use_original_imgsize)
+        FSSDataset.initialize(img_size=args.img_size, datapath=args.datapath)
         self.dataloader_val = FSSDataset.build_dataloader(
             args.benchmark, args.bsz, args.nworker, args.fold, 'val', args.shot,
             use_mask=args.mask, mask_num=args.mask_num)
@@ -77,14 +64,14 @@ class Runner(object):
     pass
 
 
-def my_parser(fold=2, shot=1, backbone='resnet50', benchmark="isaid",
-              load='./logs/demo.log/best_model.pt', use_gpu=False, gpu_id=0,
+def my_parser(fold=0, shot=1, backbone='resnet50', benchmark="isaid",
+              load='./logs/demo/best_model.pt', use_gpu=False, gpu_id=0,
               bsz=2, mask=True, mask_num=128):
     datapath = None
     if benchmark == "isaid":
-        datapath = '/data/seekyou/Data/iSAID'
+        datapath = '/mnt/4T/ALISURE/FSS-RS/remote_sensing/iSAID_patches'
     elif benchmark == "dlrsd":
-        datapath = '/data/seekyou/Data/DLRSD_split/train'
+        datapath = '/mnt/4T/ALISURE/FSS-RS/DLRSD'
 
     parser = argparse.ArgumentParser(description='MGCL Pytorch Implementation')
 
@@ -103,7 +90,6 @@ def my_parser(fold=2, shot=1, backbone='resnet50', benchmark="isaid",
     parser.add_argument('--benchmark', type=str, default=benchmark, choices=['isaid', 'dlrsd'])
     parser.add_argument('--nworker', type=int, default=8)
     parser.add_argument('--img_size', type=int, default=256)
-    parser.add_argument('--use_original_imgsize', type=bool, default=False)
     args = parser.parse_args()
     return args
 
@@ -115,9 +101,9 @@ if __name__ == '__main__':
     # 2023-10-24 09:54:36 fold=0, shot=1, mIoU: 42.77439880371094 FB-IoU: 62.60266876220703
     # 2023-11-03 14:01:02 iou: [0.3375, 0.4660, 0.4952, 0.5550, 0.2850]
     # 2023-10-24 10:04:32 fold=0, shot=5, mIoU: 49.13707733154297 FB-IoU: 66.159912109375
-    args = my_parser(fold=2, shot=5, backbone='resnet50', benchmark="dlrsd",
-                     use_gpu=True, gpu_id=0, bsz=32, mask=True, mask_num=128,
-                     load='./logs/logs/07-15_dlrsd_shot1_fold0.log/best_model.pt')
+    args = my_parser(fold=0, shot=1, backbone='resnet50', benchmark="isaid",
+                     use_gpu=True, gpu_id=0, bsz=8, mask=True, mask_num=128,
+                     load='./logs/resnet50_fold0/best_model.pt')
     # 2023-10-24 09:57:40 fold=1, shot=1, mIoU: 30.592941284179688 FB-IoU: 55.60072708129883
     # 2023-11-03 14:01:54 iou: [0.3214, 0.4551, 0.3579, 0.1319, 0.2634]
     # 2023-10-24 10:06:42 fold=1, shot=5, mIoU: 32.57774353027344 FB-IoU: 57.06192398071289

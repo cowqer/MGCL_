@@ -2,7 +2,8 @@
 logpath: demo
 gpuid: 0
 bsz: 16
-fold: 0
+epoch_num: 50
+fold: 2
 backbone: resnet50
 finetune_backbone: true
 mask: true
@@ -17,3 +18,4 @@ nworker: 8
 img_size: 256
 use_original_imgsize: false
 net_name: MGSANetwork
+is_sgd: False

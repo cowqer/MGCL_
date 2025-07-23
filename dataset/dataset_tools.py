@@ -53,15 +53,13 @@ class Evaluator:
 
 class DatasetISAID(Dataset):
 
-    def __init__(self, datapath, fold, transform, split, shot, use_original_imgsize,
-                 use_mask=False, mask_num=128):
+    def __init__(self, datapath, fold, transform, split, shot, use_mask=False, mask_num=128):
         self.split = 'val' if split in ['val', 'test'] else 'train'
         self.fold = fold
         self.nfolds = 3
         self.nclass = 15
         self.benchmark = 'isaid'
         self.shot = shot
-        self.use_original_imgsize = use_original_imgsize
         self.datapath = datapath
         self.use_mask = use_mask
         self.mask_num = mask_num
@@ -95,7 +93,7 @@ class DatasetISAID(Dataset):
         query_name, support_names, class_sample = self.sample_episode(idx)
         query_img, query_label, query_mask, support_imgs, support_labels_c, \
         support_masks, org_qry_imsize = self.load_frame(query_name, support_names)
-        
+
         query_img = self.transform(query_img)
         query_label = torch.tensor(np.array(query_label))
         query_mask = torch.tensor(np.array(query_mask))
@@ -105,9 +103,8 @@ class DatasetISAID(Dataset):
         support_masks = [torch.tensor(np.array(one)) for one in support_masks]
         support_masks = torch.stack(support_masks)
 
-        if not self.use_original_imgsize:
-            query_label = F.interpolate(query_label.unsqueeze(0).unsqueeze(0).float(),
-                                        query_img.size()[-2:], mode='nearest').squeeze()
+        query_label = F.interpolate(query_label.unsqueeze(0).unsqueeze(0).float(),
+                                    query_img.size()[-2:], mode='nearest').squeeze()
         query_label, query_ignore_idx = self.extract_ignore_idx(query_label.float(), class_sample)
 
         support_labels, support_ignore_idxs = [], []
@@ -143,19 +140,6 @@ class DatasetISAID(Dataset):
         label[label == class_id + 1] = 1
 
         return label, boundary
-
-    # def extract_ignore_idx(self, label, class_id):
-    #     label_np = np.array(label, dtype=np.uint8)
-    #     print(f"[DEBUG] class_id: {class_id}, unique pixel values: {np.unique(label_np)}")
-    
-    # 用 class_id 来匹配原始 label 索引（不要加 +1）
-        label_tensor = torch.tensor(label_np, dtype=torch.float32)
-        boundary = (label_tensor / 255).floor()
-
-        label_tensor[label_tensor != class_id] = 0
-        label_tensor[label_tensor == class_id] = 1
-
-        return label_tensor, boundary
 
     def load_frame(self, query_name, support_names):
         if self.use_mask:
@@ -235,15 +219,13 @@ class DatasetISAID(Dataset):
 
 class DatasetDLRSD(Dataset):
 
-    def __init__(self, datapath, fold, transform, split, shot, use_original_imgsize,
-                 use_mask=False, mask_num=128):
+    def __init__(self, datapath, fold, transform, split, shot, use_mask=False, mask_num=128):
         self.split = 'val' if split in ['val', 'test'] else 'train'
         self.fold = fold
         self.nfolds = 3
         self.nclass = 15
         self.benchmark = 'dlrsd'
-        self.shot = shot # few-shot 设置中的 K-shot 值
-        self.use_original_imgsize = use_original_imgsize # 是否保留图像原始尺寸
+        self.shot = shot
         self.datapath = datapath
         self.use_mask = use_mask # 是否使用预提取的 mask（如 SAM
         self.mask_num = mask_num # 使用的最大 mask 数量
@@ -277,8 +259,8 @@ class DatasetDLRSD(Dataset):
         query_name, support_names, class_sample = self.sample_episode(idx)
         query_img, query_label, query_mask, support_imgs, support_labels_c, \
         support_masks, org_qry_imsize = self.load_frame(query_name, support_names)
-        query_img = self.transform(query_img)
 
+        query_img = self.transform(query_img)
         query_label = torch.tensor(np.array(query_label))
         query_mask = torch.tensor(np.array(query_mask))
 
@@ -287,10 +269,9 @@ class DatasetDLRSD(Dataset):
         support_masks = [torch.tensor(np.array(one)) for one in support_masks]
         support_masks = torch.stack(support_masks)
 
-        if not self.use_original_imgsize:
-            query_label = F.interpolate(query_label.unsqueeze(0).unsqueeze(0).float(),
-                                        query_img.size()[-2:], mode='nearest').squeeze()
-        query_label, query_ignore_idx = self.extract_ignore_idx(query_label, class_sample)
+        query_label = F.interpolate(query_label.unsqueeze(0).unsqueeze(0).float(),
+                                    query_img.size()[-2:], mode='nearest').squeeze()
+        query_label, query_ignore_idx = self.extract_ignore_idx(query_label.float(), class_sample)
 
         support_labels, support_ignore_idxs = [], []
         for slabel in support_labels_c:
@@ -320,7 +301,7 @@ class DatasetDLRSD(Dataset):
         return batch
 
     def extract_ignore_idx(self, label, class_id):
-        label_np = np.array(label)
+        # label_np = np.array(label)
         # print(f"[DEBUG] class_id: {class_id}, expected pixel: {class_id + 1}")
         # print(f"[DEBUG] label unique pixel values: {np.unique(label_np)}")
         boundary = (label / 255).floor()
@@ -328,7 +309,6 @@ class DatasetDLRSD(Dataset):
         label[label == class_id + 1] = 1
 
         return label, boundary
-
 
     def load_frame(self, query_name, support_names):
         if self.use_mask:
@@ -348,7 +328,6 @@ class DatasetDLRSD(Dataset):
         return query_img, query_label, query_mask, \
                support_imgs, support_labels, support_masks, query_img.size
 
-    
     def read_label(self, img_name):
         path = os.path.join(self.ann_path, img_name[:-2], img_name) + '.png'
         label_img = Image.open(path)
@@ -420,12 +399,11 @@ class DatasetDLRSD(Dataset):
 class FSSDataset(object):
 
     @classmethod
-    def initialize(cls, img_size, datapath, use_original_imgsize):
+    def initialize(cls, img_size, datapath):
         cls.datasets = {'isaid': DatasetISAID, 'dlrsd': DatasetDLRSD}
         cls.img_mean = [0.485, 0.456, 0.406]
         cls.img_std = [0.229, 0.224, 0.225]
         cls.datapath = datapath
-        cls.use_original_imgsize = use_original_imgsize
         cls.transform = transforms.Compose([transforms.Resize(size=(img_size, img_size)),
                                             transforms.ToTensor(),
                                             transforms.Normalize(cls.img_mean, cls.img_std)])
@@ -434,11 +412,10 @@ class FSSDataset(object):
     @classmethod
     def build_dataloader(cls, benchmark, bsz, nworker, fold, split, shot=1, use_mask=False, mask_num=128):
         shuffle = split == 'train'
-        nworker = nworker if split == 'train' else 0
+        # nworker = nworker if split == 'train' else 0
 
         dataset = cls.datasets[benchmark](cls.datapath, fold=fold, transform=cls.transform, split=split,
-                                          shot=shot, use_original_imgsize=cls.use_original_imgsize,
-                                          use_mask=use_mask, mask_num=mask_num)
+                                          shot=shot, use_mask=use_mask, mask_num=mask_num)
         dataloader = DataLoader(dataset, batch_size=bsz, shuffle=shuffle, num_workers=nworker)
         return dataloader
 
