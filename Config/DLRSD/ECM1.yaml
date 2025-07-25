@@ -3,7 +3,7 @@ logpath: demo
 gpuid: 0
 bsz: 16
 epoch_num: 100
-fold: 0
+fold: 1
 backbone: resnet50
 finetune_backbone: true
 mask: true
@@ -17,7 +17,7 @@ max_steps: 200000
 nworker: 8
 img_size: 256
 use_original_imgsize: false
-net_name: MGANetwork
+net_name: MGCL_ECMNetwork
 is_sgd: False
 use_gpu: true
 shot: 1

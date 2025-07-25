@@ -1,7 +1,7 @@
 import torch
 import argparse
 from alisuretool.Tools import Tools
-from net.net_tools import MGCLNetwork
+from net import *
 from dataset.dataset_tools import FSSDataset, Evaluator
 from util.util_tools import MyCommon, MyOptim, AverageMeter, Logger
 import yaml
@@ -28,7 +28,9 @@ class Runner(object):
         self.args = args
         self.device = MyCommon.gpu_setup(use_gpu=True, gpu_id=args.gpuid)
 
-        self.model = MGCLNetwork(args).to(self.device)
+        # 动态选择网络
+        net_cls = globals()[self.args.net_name] if hasattr(self.args, "net_name") else MGCLNetwork
+        self.model = net_cls(args).to(self.device)
         self.optimizer = MyOptim.get_finetune_optimizer(args, self.model)
 
         FSSDataset.initialize(img_size=args.img_size, datapath=args.datapath)
@@ -36,8 +38,14 @@ class Runner(object):
             args.benchmark, args.bsz, 8, args.fold, 'train', use_mask=args.mask, mask_num=args.mask_num)
         self.dataloader_val = FSSDataset.build_dataloader(
             args.benchmark, args.bsz, 8, args.fold, 'val', use_mask=args.mask, mask_num=args.mask_num)
+        os.makedirs(args.logpath, exist_ok=True)
+        
+        # 记录模型结构到日志
+        Logger.log_params(self.model)  # 如果Logger支持
+        # 或者直接写入文本文件
 
-        Logger.log_params(self.model)
+        with open(os.path.join(args.logpath, "model_structure.txt"), "w") as f:
+            f.write(str(self.model))
         pass
 
     def train(self):
@@ -85,6 +93,7 @@ class Runner(object):
                 loss = self.model.module.compute_objective(logit, batch['query_label'])
             else:
                 loss = self.model.compute_objective(logit, batch['query_label'])
+                
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()

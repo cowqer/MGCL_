@@ -1,19 +1,5 @@
-import argparse
-import os
 import torch
-import pickle
-import datetime
-import logging
-import random
-import numpy as np
-import torch.optim as optim
 import torch.nn as nn
-from alisuretool.Tools import Tools
-from tensorboardX import SummaryWriter
-from torchvision import transforms
-from torch.utils.data import DataLoader
-from functools import reduce
-from operator import add
 import torch.nn.functional as F
 from torchvision.models import resnet
 from torchvision.models import vgg
@@ -21,63 +7,7 @@ from typing_extensions import override
 import PIL.Image as Image
 import torchvision.transforms.v2 as transforms2
 from torch.utils.data import Dataset
-
-
-class CenterPivotConv4d(nn.Module):
-    r""" CenterPivot 4D conv"""
-    def __init__(self, in_channels, out_channels, kernel_size, stride, padding, bias=True):
-        super(CenterPivotConv4d, self).__init__()
-
-        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size[:2], stride=stride[:2],
-                               bias=bias, padding=padding[:2])
-        self.conv2 = nn.Conv2d(in_channels, out_channels, kernel_size[2:], stride=stride[2:],
-                               bias=bias, padding=padding[2:])
-
-        self.stride34 = stride[2:]
-        self.kernel_size = kernel_size
-        self.stride = stride
-        self.padding = padding
-        self.idx_initialized = False
-
-    def prune(self, ct):
-        bsz, ch, ha, wa, hb, wb = ct.size()
-        if not self.idx_initialized:
-            idxh = torch.arange(start=0, end=hb, step=self.stride[2:][0], device=ct.device)
-            idxw = torch.arange(start=0, end=wb, step=self.stride[2:][1], device=ct.device)
-            self.len_h = len(idxh)
-            self.len_w = len(idxw)
-            self.idx = (idxw.repeat(self.len_h, 1) + idxh.repeat(self.len_w, 1).t() * wb).view(-1)
-            self.idx_initialized = True
-        ct_pruned = ct.view(bsz, ch, ha, wa, -1).index_select(4, self.idx).view(bsz, ch, ha, wa, self.len_h, self.len_w)
-
-        return ct_pruned
-
-    def forward(self, x):
-        if self.stride[2:][-1] > 1:
-            out1 = self.prune(x)
-        else:
-            out1 = x
-        bsz, inch, ha, wa, hb, wb = out1.size()
-        out1 = out1.permute(0, 4, 5, 1, 2, 3).contiguous().view(-1, inch, ha, wa)
-        out1 = self.conv1(out1)
-        outch, o_ha, o_wa = out1.size(-3), out1.size(-2), out1.size(-1)
-        out1 = out1.view(bsz, hb, wb, outch, o_ha, o_wa).permute(0, 3, 4, 5, 1, 2).contiguous()
-
-        bsz, inch, ha, wa, hb, wb = x.size()
-        out2 = x.permute(0, 2, 3, 1, 4, 5).contiguous().view(-1, inch, hb, wb)
-        out2 = self.conv2(out2)
-        outch, o_hb, o_wb = out2.size(-3), out2.size(-2), out2.size(-1)
-        out2 = out2.view(bsz, ha, wa, outch, o_hb, o_wb).permute(0, 3, 1, 2, 4, 5).contiguous()
-
-        if out1.size()[-2:] != out2.size()[-2:] and self.padding[-2:] == (0, 0):
-            out1 = out1.view(bsz, outch, o_ha, o_wa, -1).sum(dim=-1)
-            out2 = out2.squeeze()
-
-        y = out1 + out2
-        return y
-
-    pass
-
+from .modules import CenterPivotConv4d
 
 class MGCDModule(nn.Module):
 
@@ -149,7 +79,7 @@ class MGCDModule(nn.Module):
 
         if query_mask is not None:
             # MGFE
-            _hypercorr_encoded = MGAModule.update_feature_one(hypercorr_encoded, query_mask)
+            _hypercorr_encoded = MGFEModule.update_feature_one(hypercorr_encoded, query_mask)
             hypercorr_encoded = torch.concat([hypercorr_encoded, _hypercorr_encoded], dim=1)
         else:
             hypercorr_encoded = torch.concat([hypercorr_encoded, hypercorr_encoded], dim=1)
@@ -171,14 +101,13 @@ class SegmentationHead(nn.Module):
     def __init__(self):
         super().__init__()
         self.mgcd = MGCDModule([2, 2, 2])
+
         pass
 
     def forward(self, query_feats, support_feats, support_label, query_mask, support_masks):
         # MGFE
-
-        _query_feats, _support_feats = MGAModule.update_feature(
+        _query_feats, _support_feats = MGFEModule.update_feature(
             query_feats, support_feats, query_mask, support_masks)
-
         query_feats = [torch.concat([one, two], dim=1) for one, two in zip(query_feats, _query_feats)]
         support_feats = [torch.concat([one, two], dim=1) for one, two in zip(support_feats, _support_feats)]
 
@@ -227,7 +156,7 @@ class SegmentationHead(nn.Module):
 class MGFEModule(object):
 
     @classmethod
-    def update_feature_one(cls, query_feat, query_mask):
+    def update_feature_one(cls, query_feat, query_mask):##仅仅用于在MGCD模块中的增强作用
         '''
         给一个特征和mask，输出「增强」后的特征。
         '''
@@ -249,21 +178,23 @@ class MGFEModule(object):
         index_mask = torch.zeros_like(masks[:, 0]).long() + m
         for i in range(m):
             index_mask[masks[:, i]==1] = i
-        masks = torch.nn.functional.one_hot(index_mask)[:, :, :, :m].permute((0, 3, 1, 2))
+        masks = torch.nn.functional.one_hot(index_mask)[:, :, :, :m].permute((0, 3, 1, 2))##这一步能将一个像素只属于一个区域的硬掩码明确表示为 one-hot。
 
         enabled_feats = []
         for feat in feats:
-            target_masks = F.interpolate(masks.float(), feat.shape[-2:], mode='nearest')
+            target_masks = F.interpolate(masks.float(), feat.shape[-2:], mode='nearest')##将掩码插值到特征图的空间尺寸
+            # 计算每个区域的特征的平均值
             map_features = cls.my_masked_average_pooling(feat, target_masks)
 
             b, m, w, h = target_masks.shape
             _, _, c = map_features.shape
-            _map_features = map_features.permute(0, 2, 1).contiguous()
+            _map_features = map_features.permute(0, 2, 1).contiguous()#把 M 个区域特征按像素所属的区域投影回每个空间位置；
+            #即每个像素将获取所属区域的平均特征值，构造出新的语义特征图。
             feature_sum = _map_features @ target_masks.view(b, m, -1)
             feature_sum = feature_sum.view(b, c, w, h)
 
             sum_mask = target_masks.sum(dim=1, keepdim=True)
-            enabled_feat = torch.div(feature_sum, sum_mask + 1e-8)
+            enabled_feat = torch.div(feature_sum, sum_mask + 1e-8)#除以掩码像素数量（均值）
             enabled_feats.append(enabled_feat)
             pass
         return enabled_feats
@@ -284,118 +215,13 @@ class MGFEModule(object):
     pass
 
 
-import torch
-import torch.nn.functional as F
-
-class MGAModule(object):
-
-    @classmethod
-    def update_feature_one(cls, query_feat, query_mask):
-        '''
-        给一个特征和mask，输出「增强」后的特征。
-        '''
-        return cls.enabled_feature([query_feat], query_mask)[0]
-
-    @classmethod
-    def update_feature(cls, query_feats, support_feats, query_mask, support_masks):
-        '''
-        给一组特征和mask，输出「增强」后的特征。
-        '''
-        query_feats = cls.enabled_feature(query_feats, query_mask)
-        support_feats = cls.enabled_feature(support_feats, support_masks)
-        return query_feats, support_feats
-
-    @classmethod
-    def enabled_feature(cls, feats, masks):
-        """
-        - feats: list of tensors of shape (b, c, h, w)
-        - masks: (b, m, h, w)
-        """
-        # ① 先用最后一层算全局的 attention map
-        last_feat = feats[-1]
-        attention_map = cls.compute_attention_map(last_feat, masks)  # (b, 1, H, W)
-
-        enabled_feats = []
-        for feat in feats:
-            # 插值对齐特征尺寸
-            att_resized = F.interpolate(attention_map, size=feat.shape[-2:], mode='bilinear', align_corners=False)
-            enhanced_feat = feat * (att_resized + 1.0)  # +1 是保留原始特征，避免过强抑制
-            enabled_feats.append(enhanced_feat)
-
-        return enabled_feats
-
-    @classmethod
-    def compute_attention_map(cls, feat, masks):
-        """
-        给最后一层特征和mask，返回一个判别性的 attention map
-        - feat: (b, c, h, w)
-        - masks: (b, m, h_mask, w_mask)
-        return: (b, 1, h, w)
-        """
-        b, m, h_mask, w_mask = masks.shape
-        _, c, h, w = feat.shape
-
-        # 构造 one-hot 掩码 (b, m, h_mask, w_mask)
-        index_mask = torch.zeros_like(masks[:, 0]).long() + m  # default class
-        for i in range(m):
-            index_mask[masks[:, i] == 1] = i
-        masks_onehot = F.one_hot(index_mask, num_classes=m+1).permute(0, 3, 1, 2)[:, :m]
-
-        # 插值 mask 到 feat 空间尺寸
-        target_masks = F.interpolate(masks_onehot.float(), size=(h, w), mode='nearest')
-
-        # 提取 prototype
-        prototypes = cls.my_masked_average_pooling(feat, target_masks)  # (b, c, m)
-
-        # Cosine 相似度
-        feat_flat = feat.view(b, c, -1)  # (b, c, hw)
-        feat_norm = F.normalize(feat_flat, dim=1)  # (b, c, hw)
-        proto_norm = F.normalize(prototypes, dim=1)  # (b, c, m)
-        sim_map = torch.bmm(proto_norm.transpose(1, 2), feat_norm)  # (b, m, hw)
-        sim_map = sim_map.view(b, m, h, w)
-
-        # 归一化
-        sim_map = sim_map.view(b * m, -1)
-        sim_map = (sim_map - sim_map.min(dim=1, keepdim=True)[0]) / \
-                  (sim_map.max(dim=1, keepdim=True)[0] - sim_map.min(dim=1, keepdim=True)[0] + 1e-8)
-        sim_map = sim_map.view(b, m, h, w)
-
-        # 判别图（FG - BG）
-        if m >= 2:
-            att_fg = sim_map[:, 0:1]
-            att_bg = sim_map[:, 1:2]
-            disc_att = F.relu(att_fg - att_bg)  # 判别 attention
-            return disc_att  # (b, 1, h, w)
-        else:
-            return sim_map  # (b, m, h, w)
-
-    @staticmethod
-    def my_masked_average_pooling(feature, mask):
-        '''
-        - feature: (b, c, h, w)
-        - mask: (b, m, h, w)
-        return: (b, c, m)
-        '''
-        b, c, h, w = feature.shape
-        _, m, _, _ = mask.shape
-
-        feature = feature.view(b, c, -1)  # (b, c, hw)
-        mask = mask.view(b, m, -1)        # (b, m, hw)
-
-        mask_sum = mask.sum(dim=2, keepdim=True) + 1e-8
-        pooled = torch.bmm(feature, mask.transpose(1, 2)) / mask_sum.transpose(1, 2)  # (b, c, m)
-
-        return pooled  # (b, c, m)
-
-
 class MGCLNetwork(nn.Module):
 
-    def __init__(self, args, use_original_imgsize):
+    def __init__(self, args):
         super().__init__()
         self.args = args
         self.backbone_type = args.backbone
         self.finetune_backbone = args.finetune_backbone if hasattr(args, "finetune_backbone") else False
-        self.use_original_imgsize = use_original_imgsize
 
         if "vgg" in self.backbone_type:
             self.backbone = vgg.vgg16(pretrained=True)
@@ -423,8 +249,7 @@ class MGCLNetwork(nn.Module):
                 pass
             pass
         # MGFE, FBC, MGCD
-        logit = self.segmentation_head(
-            query_feats, support_feats, support_label.clone(), query_mask, support_masks)
+        logit = self.segmentation_head(query_feats, support_feats, support_label.clone(), query_mask, support_masks)
         logit = F.interpolate(logit, support_img.size()[2:], mode='bilinear', align_corners=True)
         return logit
 
@@ -433,16 +258,9 @@ class MGCLNetwork(nn.Module):
         logit_label_agg = 0
         for s_idx in range(nshot):
             logit_label = self.forward(
-                batch['query_img'], batch['support_imgs'][:, s_idx],
-                batch['support_labels'][:, s_idx],
-                query_mask=batch['query_mask']
-                if 'query_mask' in batch and self.args.mask else None,
-                support_masks=batch['support_masks'][:, s_idx]
-                if 'support_masks' in batch and self.args.mask else None)
-
-            if self.use_original_imgsize:
-                org_qry_imsize = tuple([batch['org_query_imsize'][1].item(), batch['org_query_imsize'][0].item()])
-                logit_label = F.interpolate(logit_label, org_qry_imsize, mode='bilinear', align_corners=True)
+                batch['query_img'], batch['support_imgs'][:, s_idx],  batch['support_labels'][:, s_idx],
+                query_mask=batch['query_mask'] if 'query_mask' in batch and self.args.mask else None,
+                support_masks=batch['support_masks'][:, s_idx] if 'support_masks' in batch and self.args.mask else None)
 
             result_i = logit_label.argmax(dim=1).clone()
             logit_label_agg += result_i
@@ -501,4 +319,3 @@ class MGCLNetwork(nn.Module):
         return feats
 
     pass
-

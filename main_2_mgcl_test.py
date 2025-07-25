@@ -1,9 +1,21 @@
 import torch
 import argparse
 from alisuretool.Tools import Tools
-from net.net_tools import MGCLNetwork
+from net.net_tools import *
 from util.util_tools import MyCommon, AverageMeter, Logger
 from dataset.dataset_tools import FSSDataset, Evaluator
+import yaml
+import os
+
+def load_yaml_config(yaml_path):
+    with open(yaml_path, 'r') as f:
+        cfg = yaml.safe_load(f)
+    import argparse
+    args = argparse.Namespace(**cfg)
+    # 获取yaml文件名（不含扩展名）
+    yaml_base = os.path.splitext(os.path.basename(yaml_path))[0]
+    args.logpath = yaml_base
+    return args
 
 
 class Runner(object):
@@ -12,7 +24,9 @@ class Runner(object):
         self.args = args
         self.device = MyCommon.gpu_setup(use_gpu=self.args.use_gpu, gpu_id=args.gpuid)
 
-        self.model = MGCLNetwork(args).to(self.device)
+        # 根据net_name动态选择网络
+        net_cls = globals()[self.args.net_name]
+        self.model = net_cls(args).to(self.device)
         self.model.eval()
         weights = torch.load(args.load, map_location=None if self.args.use_gpu else torch.device('cpu'))
         weights = {one.replace("module.", ""): weights[one] for one in weights.keys()}
@@ -93,38 +107,22 @@ def my_parser(fold=0, shot=1, backbone='resnet50', benchmark="isaid",
     args = parser.parse_args()
     return args
 
-
 if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser(description='Specify YAML config file and model weights')
+    parser.add_argument('--config', type=str, required=True, help='Path to YAML config file')
+    parser.add_argument('--load', type=str, required=True, help='Path to model weights (.pt)')
+    args_cmd = parser.parse_args()
+    yaml_path = args_cmd.config
+
+    args = load_yaml_config(yaml_path)
+    args.load = args_cmd.load  # 用命令行指定pt文件路径覆盖yaml中的load
+
     MyCommon.fix_randseed(0)
-
-    # isaid resnet50
-    # 2023-10-24 09:54:36 fold=0, shot=1, mIoU: 42.77439880371094 FB-IoU: 62.60266876220703
-    # 2023-11-03 14:01:02 iou: [0.3375, 0.4660, 0.4952, 0.5550, 0.2850]
-    # 2023-10-24 10:04:32 fold=0, shot=5, mIoU: 49.13707733154297 FB-IoU: 66.159912109375
-    args = my_parser(fold=0, shot=1, backbone='resnet50', benchmark="isaid",
-                     use_gpu=True, gpu_id=0, bsz=8, mask=True, mask_num=128,
-                     load='./logs/resnet50_fold0/best_model.pt')
-    # 2023-10-24 09:57:40 fold=1, shot=1, mIoU: 30.592941284179688 FB-IoU: 55.60072708129883
-    # 2023-11-03 14:01:54 iou: [0.3214, 0.4551, 0.3579, 0.1319, 0.2634]
-    # 2023-10-24 10:06:42 fold=1, shot=5, mIoU: 32.57774353027344 FB-IoU: 57.06192398071289
-    # args = my_parser(fold=1, shot=1, backbone='resnet50', benchmark="isaid",
-    #                  use_gpu=True, gpu_id=0, bsz=8, mask=True, mask_num=128,
-    #                  load='./logs/resnet50_fold1/best_model.pt')
-
-    # 2023-10-24 09:57:02 fold=2, shot=1, mIoU: 46.38703918457031 FB-IoU: 58.5185661315918
-    # 2023-11-03 14:02:02 iou: [0.4573, 0.6166, 0.4611, 0.5389, 0.2456],
-    # 2023-10-24 10:25:51 fold=2, shot=5, mIoU: 52.74596405029297 FB-IoU: 62.11357116699219
-    # args = my_parser(fold=2, shot=1, backbone='resnet50', benchmark="isaid",
-    #                  use_gpu=True, gpu_id=0, bsz=8, mask=True, mask_num=128,
-    #                  load='./logs/resnet50_fold2/best_model.pt')
-
     Logger.initialize(args, training=False)
     runner = Runner(args=args)
     Logger.log_params(runner.model)
 
-    # miou, fb_iou = runner.test()
-    # Tools.print("mIoU: {} FB-IoU: {}".format(miou, fb_iou))
     miou, fb_iou, iou = runner.test_class()
     Tools.print("mIoU: {} FB-IoU: {} iou: {}".format(miou, fb_iou, iou))
     pass
-

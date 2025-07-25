@@ -7,167 +7,7 @@ from typing_extensions import override
 import PIL.Image as Image
 import torchvision.transforms.v2 as transforms2
 from torch.utils.data import Dataset
-
-#######################7.15
-class MGAModule(object):
-
-    @classmethod
-    def update_feature_one(cls, query_feat, query_mask):
-        '''
-        给一个特征和mask，输出「增强」后的特征。
-        '''
-        return cls.enabled_feature([query_feat], query_mask)[0]
-
-    @classmethod
-    def update_feature(cls, query_feats, support_feats, query_mask, support_masks):
-        '''
-        给一组特征和mask，输出「增强」后的特征。
-        '''
-        query_feats = cls.enabled_feature(query_feats, query_mask)
-        support_feats = cls.enabled_feature(support_feats, support_masks)
-        return query_feats, support_feats
-
-    @classmethod
-    def enabled_feature(cls, feats, masks):
-        """
-        - feats: list of tensors of shape (b, c, h, w)
-        - masks: (b, m, h, w)
-        """
-        # ① 先用最后一层算全局的 attention map
-        last_feat = feats[-1]
-        attention_map = cls.compute_attention_map(last_feat, masks)  # (b, 1, H, W)
-
-        enabled_feats = []
-        for feat in feats:
-            # 插值对齐特征尺寸
-            att_resized = F.interpolate(attention_map, size=feat.shape[-2:], mode='bilinear', align_corners=False)
-            enhanced_feat = feat * (att_resized + 1.0)  # +1 是保留原始特征，避免过强抑制
-            enabled_feats.append(enhanced_feat)
-
-        return enabled_feats
-
-    @classmethod
-    def compute_attention_map(cls, feat, masks):
-        """
-        给最后一层特征和mask，返回一个判别性的 attention map
-        - feat: (b, c, h, w)
-        - masks: (b, m, h_mask, w_mask)
-        return: (b, 1, h, w)
-        """
-        b, m, h_mask, w_mask = masks.shape
-        _, c, h, w = feat.shape
-
-        # 构造 one-hot 掩码 (b, m, h_mask, w_mask)
-        index_mask = torch.zeros_like(masks[:, 0]).long() + m  # default class
-        for i in range(m):
-            index_mask[masks[:, i] == 1] = i
-        masks_onehot = F.one_hot(index_mask, num_classes=m+1).permute(0, 3, 1, 2)[:, :m]
-
-        # 插值 mask 到 feat 空间尺寸
-        target_masks = F.interpolate(masks_onehot.float(), size=(h, w), mode='nearest')
-
-        # 提取 prototype
-        prototypes = cls.my_masked_average_pooling(feat, target_masks)  # (b, c, m)
-
-        # Cosine 相似度
-        feat_flat = feat.view(b, c, -1)  # (b, c, hw)
-        feat_norm = F.normalize(feat_flat, dim=1)  # (b, c, hw)
-        proto_norm = F.normalize(prototypes, dim=1)  # (b, c, m)
-        sim_map = torch.bmm(proto_norm.transpose(1, 2), feat_norm)  # (b, m, hw)
-        sim_map = sim_map.view(b, m, h, w)
-
-        # 归一化
-        sim_map = sim_map.view(b * m, -1)
-        sim_map = (sim_map - sim_map.min(dim=1, keepdim=True)[0]) / \
-                  (sim_map.max(dim=1, keepdim=True)[0] - sim_map.min(dim=1, keepdim=True)[0] + 1e-8)
-        sim_map = sim_map.view(b, m, h, w)
-
-        # 判别图（FG - BG）
-        if m >= 2:
-            att_fg = sim_map[:, 0:1]
-            att_bg = sim_map[:, 1:2]
-            disc_att = F.relu(att_fg - att_bg)  # 判别 attention
-            return disc_att  # (b, 1, h, w)
-        else:
-            return sim_map  # (b, m, h, w)
-
-    @staticmethod
-    def my_masked_average_pooling(feature, mask):
-        '''
-        - feature: (b, c, h, w)
-        - mask: (b, m, h, w)
-        return: (b, c, m)
-        '''
-        b, c, h, w = feature.shape
-        _, m, _, _ = mask.shape
-
-        feature = feature.view(b, c, -1)  # (b, c, hw)
-        mask = mask.view(b, m, -1)        # (b, m, hw)
-
-        mask_sum = mask.sum(dim=2, keepdim=True) + 1e-8
-        pooled = torch.bmm(feature, mask.transpose(1, 2)) / mask_sum.transpose(1, 2)  # (b, c, m)
-
-        return pooled  # (b, c, m)
-
-
-##########################7.16
-# class MGSAModule(object):
-
-class CenterPivotConv4d(nn.Module):
-    r""" CenterPivot 4D conv"""
-    def __init__(self, in_channels, out_channels, kernel_size, stride, padding, bias=True):
-        super(CenterPivotConv4d, self).__init__()
-
-        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size[:2], stride=stride[:2],
-                               bias=bias, padding=padding[:2])
-        self.conv2 = nn.Conv2d(in_channels, out_channels, kernel_size[2:], stride=stride[2:],
-                               bias=bias, padding=padding[2:])
-
-        self.stride34 = stride[2:]
-        self.kernel_size = kernel_size
-        self.stride = stride
-        self.padding = padding
-        self.idx_initialized = False
-
-    def prune(self, ct):
-        bsz, ch, ha, wa, hb, wb = ct.size()
-        if not self.idx_initialized:
-            idxh = torch.arange(start=0, end=hb, step=self.stride[2:][0], device=ct.device)
-            idxw = torch.arange(start=0, end=wb, step=self.stride[2:][1], device=ct.device)
-            self.len_h = len(idxh)
-            self.len_w = len(idxw)
-            self.idx = (idxw.repeat(self.len_h, 1) + idxh.repeat(self.len_w, 1).t() * wb).view(-1)
-            self.idx_initialized = True
-        ct_pruned = ct.view(bsz, ch, ha, wa, -1).index_select(4, self.idx).view(bsz, ch, ha, wa, self.len_h, self.len_w)
-
-        return ct_pruned
-
-    def forward(self, x):
-        if self.stride[2:][-1] > 1:
-            out1 = self.prune(x)
-        else:
-            out1 = x
-        bsz, inch, ha, wa, hb, wb = out1.size()
-        out1 = out1.permute(0, 4, 5, 1, 2, 3).contiguous().view(-1, inch, ha, wa)
-        out1 = self.conv1(out1)
-        outch, o_ha, o_wa = out1.size(-3), out1.size(-2), out1.size(-1)
-        out1 = out1.view(bsz, hb, wb, outch, o_ha, o_wa).permute(0, 3, 4, 5, 1, 2).contiguous()
-
-        bsz, inch, ha, wa, hb, wb = x.size()
-        out2 = x.permute(0, 2, 3, 1, 4, 5).contiguous().view(-1, inch, hb, wb)
-        out2 = self.conv2(out2)
-        outch, o_hb, o_wb = out2.size(-3), out2.size(-2), out2.size(-1)
-        out2 = out2.view(bsz, ha, wa, outch, o_hb, o_wb).permute(0, 3, 1, 2, 4, 5).contiguous()
-
-        if out1.size()[-2:] != out2.size()[-2:] and self.padding[-2:] == (0, 0):
-            out1 = out1.view(bsz, outch, o_ha, o_wa, -1).sum(dim=-1)
-            out2 = out2.squeeze()
-
-        y = out1 + out2
-        return y
-
-    pass
-
+from .modules import CenterPivotConv4d
 
 class MGCDModule(nn.Module):
 
@@ -261,15 +101,26 @@ class SegmentationHead(nn.Module):
     def __init__(self):
         super().__init__()
         self.mgcd = MGCDModule([2, 2, 2])
+
         pass
 
     def forward(self, query_feats, support_feats, support_label, query_mask, support_masks):
         # MGFE
+
+        ##query_feats shapes: [torch.Size([16, 512, 32, 32]), torch.Size([16, 1024, 16, 16]), torch.Size([16, 2048, 8, 8])]
+        ##support_feats shapes: [torch.Size([16, 512, 32, 32]), torch.Size([16, 1024, 16, 16]), torch.Size([16, 2048, 8, 8])]
+        
+        ##query_feats after MGFEModule [torch.Size([16, 1024, 32, 32]), torch.Size([16, 2048, 16, 16]), torch.Size([16, 4096, 8, 8])]
+        ##support_feats after MGFEModule [torch.Size([16, 1024, 32, 32]), torch.Size([16, 2048, 16, 16]), torch.Size([16, 4096, 8, 8])]
+        
         _query_feats, _support_feats = MGFEModule.update_feature(
             query_feats, support_feats, query_mask, support_masks)
         query_feats = [torch.concat([one, two], dim=1) for one, two in zip(query_feats, _query_feats)]
         support_feats = [torch.concat([one, two], dim=1) for one, two in zip(support_feats, _support_feats)]
-
+        
+        print("query_feats after MGFEModule", [f.shape for f in query_feats])
+        print("support_feats after MGFEModule", [f.shape for f in support_feats])
+        
         # FBC
         support_feats_fg = [self.label_feature(
             support_feat, support_label.clone())for support_feat in support_feats]
@@ -337,21 +188,23 @@ class MGFEModule(object):
         index_mask = torch.zeros_like(masks[:, 0]).long() + m
         for i in range(m):
             index_mask[masks[:, i]==1] = i
-        masks = torch.nn.functional.one_hot(index_mask)[:, :, :, :m].permute((0, 3, 1, 2))
+        masks = torch.nn.functional.one_hot(index_mask)[:, :, :, :m].permute((0, 3, 1, 2))##这一步能将一个像素只属于一个区域的硬掩码明确表示为 one-hot。
 
         enabled_feats = []
         for feat in feats:
-            target_masks = F.interpolate(masks.float(), feat.shape[-2:], mode='nearest')
+            target_masks = F.interpolate(masks.float(), feat.shape[-2:], mode='nearest')##将掩码插值到特征图的空间尺寸
+            # 计算每个区域的特征的平均值
             map_features = cls.my_masked_average_pooling(feat, target_masks)
 
             b, m, w, h = target_masks.shape
             _, _, c = map_features.shape
-            _map_features = map_features.permute(0, 2, 1).contiguous()
+            _map_features = map_features.permute(0, 2, 1).contiguous()#把 M 个区域特征按像素所属的区域投影回每个空间位置；
+            #即每个像素将获取所属区域的平均特征值，构造出新的语义特征图。
             feature_sum = _map_features @ target_masks.view(b, m, -1)
             feature_sum = feature_sum.view(b, c, w, h)
 
             sum_mask = target_masks.sum(dim=1, keepdim=True)
-            enabled_feat = torch.div(feature_sum, sum_mask + 1e-8)
+            enabled_feat = torch.div(feature_sum, sum_mask + 1e-8)#除以掩码像素数量（均值）
             enabled_feats.append(enabled_feat)
             pass
         return enabled_feats
@@ -476,108 +329,3 @@ class MGCLNetwork(nn.Module):
         return feats
 
     pass
-
-class SegmentationHead_MGA(SegmentationHead):
-    """
-    SegmentationHead_MGA is a subclass of SegmentationHead that implements the Multi-Granularity Attention mechanism.
-    It uses the same backbone and segmentation head but focuses on multi-granularity attention mechanisms.
-    """
-    def forward(self, query_feats, support_feats, support_label, query_mask, support_masks):
-        # MGFE
-        _query_feats, _support_feats = MGAModule.update_feature(
-            query_feats, support_feats, query_mask, support_masks)
-        query_feats = [torch.concat([one, two], dim=1) for one, two in zip(query_feats, _query_feats)]
-        support_feats = [torch.concat([one, two], dim=1) for one, two in zip(support_feats, _support_feats)]
-
-        # FBC
-        support_feats_fg = [self.label_feature(
-            support_feat, support_label.clone())for support_feat in support_feats]
-        support_feats_bg = [self.label_feature(
-            support_feat, (1 - support_label).clone())for support_feat in support_feats]
-        corr_fg = self.multilayer_correlation(query_feats, support_feats_fg)
-        corr_bg = self.multilayer_correlation(query_feats, support_feats_bg)
-        corr = [torch.concatenate([fg_one[:, None], bg_one[:, None]],
-                                  dim=1) for fg_one, bg_one in zip(corr_fg, corr_bg)]
-
-        # MGCD
-        logit = self.mgcd(corr[::-1], query_mask)
-        return logit
-    
-class CrossAttention(nn.Module):
-    def __init__(self, in_channels):
-        super().__init__()
-        self.query_proj = nn.Conv2d(in_channels, in_channels, 1)
-        self.key_proj = nn.Conv2d(in_channels, in_channels, 1)
-        self.value_proj = nn.Conv2d(in_channels, in_channels, 1)
-        self.softmax = nn.Softmax(dim=-1)
-
-    def forward(self, query, support):
-        B, C, H, W = query.shape
-
-        Q = self.query_proj(query).view(B, C, -1)  # B x C x HW
-        K = self.key_proj(support).view(B, C, -1)
-        V = self.value_proj(support).view(B, C, -1)
-
-        attn = torch.bmm(Q.transpose(1, 2), K) / (C ** 0.5)  # B x HW_q x HW_s
-        attn = self.softmax(attn)
-
-        out = torch.bmm(attn, V.transpose(1, 2))  # B x HW_q x C
-        out = out.transpose(1, 2).view(B, C, H, W)
-        return out + query
-
-    # Additional methods specific to MGA can be added here
-class SegmentationHead_MGA(SegmentationHead):
-    def forward(self, query_feats, support_feats, support_label, query_mask, support_masks):
-        # MGFE
-        _query_feats, _support_feats = MGFEModule.update_feature(
-            query_feats, support_feats, query_mask, support_masks)
-        query_feats = [torch.concat([one, two], dim=1) for one, two in zip(query_feats, _query_feats)]
-        support_feats = [torch.concat([one, two], dim=1) for one, two in zip(support_feats, _support_feats)]
-
-        # FBC
-        support_feats_fg = [self.label_feature(
-            support_feat, support_label.clone())for support_feat in support_feats]
-        support_feats_bg = [self.label_feature(
-            support_feat, (1 - support_label).clone())for support_feat in support_feats]
-        corr_fg = self.multilayer_correlation(query_feats, support_feats_fg)
-        corr_bg = self.multilayer_correlation(query_feats, support_feats_bg)
-        corr = [torch.concatenate([fg_one[:, None], bg_one[:, None]],
-                                  dim=1) for fg_one, bg_one in zip(corr_fg, corr_bg)]
-
-        # MGCD
-        logit = self.mgcd(corr[::-1], query_mask)
-        return logit
-    
-class SegmentationHead_MGSA(SegmentationHead):
-    def forward(self, query_feats, support_feats, support_label, query_mask, support_masks):
-        # MGFE
-        _query_feats, _support_feats = MGFEModule.update_feature(
-        query_feats, support_feats, query_mask, support_masks)
-        query_feats = [torch.concat([one, two], dim=1) for one, two in zip(query_feats, _query_feats)]
-        support_feats = [torch.concat([one, two], dim=1) for one, two in zip(support_feats, _support_feats)]
-
-        # FBC
-        support_feats_fg = [self.label_feature(
-            support_feat, support_label.clone())for support_feat in support_feats]
-        support_feats_bg = [self.label_feature(
-            support_feat, (1 - support_label).clone())for support_feat in support_feats]
-        corr_fg = self.multilayer_correlation(query_feats, support_feats_fg)
-        corr_bg = self.multilayer_correlation(query_feats, support_feats_bg)
-        corr = [torch.concatenate([fg_one[:, None], bg_one[:, None]],
-                                  dim=1) for fg_one, bg_one in zip(corr_fg, corr_bg)]
-
-        # MGCD
-        logit = self.mgcd(corr[::-1], query_mask)
-        return logit
-    
-class MGANetwork(MGCLNetwork):
-    """
-    MGANet is a subclass of MGCLNetwork that implements the Multi-Granularity Attention Network.
-    It uses the same backbone and segmentation head but focuses on multi-granularity attention mechanisms.
-    """
-    def __init__(self, args):
-        super().__init__(args)
-        self.segmentation_head = SegmentationHead()  # Reuse SegmentationHead for MGANet
-        pass
-
-    # Additional methods specific to MGANet can be added here
