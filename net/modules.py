@@ -2,7 +2,59 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-__all__ = ['CenterPivotConv4d']
+
+import torch
+import torch.nn.functional as F
+
+import torch
+import torch.nn.functional as F
+
+def my_masked_average_pooling(feature, mask):
+        b, c, w, h = feature.shape
+        _, m, _, _ = mask.shape
+
+        _mask = mask.view(b, m, -1)
+        _feature = feature.view(b, c, -1).permute(0, 2, 1).contiguous()
+        feature_sum = _mask @ _feature
+        masked_sum = torch.sum(_mask, dim=2, keepdim=True)
+
+        masked_average_pooling = torch.div(feature_sum, masked_sum + 1e-8)
+        return masked_average_pooling
+
+pass
+def masked_avg_pool(feat, mask):
+    # feat: [B, C, H, W]
+    # mask: [B, 1, H_img, W_img] -> 需要下采样到 [B, 1, H, W]
+    B, C, H, W = feat.shape
+    mask = F.interpolate(mask, size=(H, W), mode='bilinear', align_corners=False)
+
+    masked_feat = feat * mask  # [B, C, H, W]
+    sum_feat = masked_feat.sum(dim=(2, 3))  # [B, C]
+    mask_sum = mask.sum(dim=(2, 3)) + 1e-5  # [B, 1]
+    avg_feat = sum_feat / mask_sum  # [B, C]
+    return avg_feat  # [B, C]
+
+def compute_cosine_similarity(query_feats, prototype):
+    # query_feats: [B, C, H, W], prototype: [B, C]
+    B, C, H, W = query_feats.shape
+    query_feats = F.normalize(query_feats, dim=1)  # [B, C, H, W]
+    prototype = F.normalize(prototype, dim=1).view(B, C, 1, 1)  # [B, C, 1, 1]
+    sim_map = (query_feats * prototype).sum(dim=1, keepdim=True)  # [B, 1, H, W]
+    return sim_map
+
+def compute_query_prior(query_feats, prototype_fg, prototype_bg):
+
+    sim_fg = compute_cosine_similarity(query_feats, prototype_fg)  # [B, 1, H, W]
+    sim_bg = compute_cosine_similarity(query_feats, prototype_bg)  # [B, 1, H, W]
+    sim = torch.cat([sim_fg, sim_bg], dim=1)  # [B, 2, H, W]
+    prior = F.softmax(sim, dim=1)  # [B, 2, H, W]
+    return prior[:, 0:1], prior[:, 1:2]  # foreground_prior, background_prior
+
+def get_query_foreground_prototype(query_feats, fg_prior):
+    B, C, H, W = query_feats.shape
+    weighted_feat = query_feats * fg_prior  # [B, C, H, W]
+    proto = weighted_feat.sum(dim=(2, 3)) / (fg_prior.sum(dim=(2, 3)) + 1e-5)  # [B, C]
+    return proto
 
 class CenterPivotConv4d(nn.Module):
     r""" CenterPivot 4D conv"""

@@ -7,7 +7,7 @@ from typing_extensions import override
 import PIL.Image as Image
 import torchvision.transforms.v2 as transforms2
 from torch.utils.data import Dataset
-from .modules import CenterPivotConv4d
+from .modules import *
 
 class MGCDModule(nn.Module):
 
@@ -113,8 +113,8 @@ class SegmentationHead(nn.Module):
         ##query_feats after MGFEModule [torch.Size([16, 1024, 32, 32]), torch.Size([16, 2048, 16, 16]), torch.Size([16, 4096, 8, 8])]
         ##support_feats after MGFEModule [torch.Size([16, 1024, 32, 32]), torch.Size([16, 2048, 16, 16]), torch.Size([16, 4096, 8, 8])]
         
-        _query_feats, _support_feats = MGFEModule.update_feature(
-            query_feats, support_feats, query_mask, support_masks)
+        _query_feats, _support_feats = MGFEModule.update_feature(query_feats, support_feats, query_mask, support_masks)
+        
         query_feats = [torch.concat([one, two], dim=1) for one, two in zip(query_feats, _query_feats)]
         support_feats = [torch.concat([one, two], dim=1) for one, two in zip(support_feats, _support_feats)]
         

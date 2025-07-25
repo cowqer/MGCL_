@@ -8,19 +8,32 @@ import yaml
 import datetime
 import os
 
+
 def load_yaml_config(yaml_path):
     with open(yaml_path, 'r') as f:
         cfg = yaml.safe_load(f)
+
     import argparse
     args = argparse.Namespace(**cfg)
+
     # 获取yaml文件名（不含扩展名）
     yaml_base = os.path.splitext(os.path.basename(yaml_path))[0]
-    # 自动生成 logpath，格式如 config0_0723_153045
+
+    # 自动生成 logpath，格式如 logs/config0/config0_0725__150310/
     now = datetime.datetime.now()
     time_str = now.strftime("%m%d__%H_%M%S")
-    args.logpath = f"{yaml_base}_{time_str}"
+    
+    # 以配置名作为目录名，再拼接时间戳
+    args.logpath = os.path.join("logs", yaml_base, f"{yaml_base}_{time_str}")
+
+    # 创建目录（如果 Logger 内部不处理的话）
+    os.makedirs(args.logpath, exist_ok=True)
+
+    # 初始化 Logger
     Logger.initialize(args, training=True)
+
     return args
+
 
 class Runner(object):
 
@@ -44,9 +57,9 @@ class Runner(object):
         Logger.log_params(self.model)  # 如果Logger支持
         # 或者直接写入文本文件
 
-        with open(os.path.join(args.logpath, "model_structure.txt"), "w") as f:
-            f.write(str(self.model))
-        pass
+        # with open(os.path.join(args.logpath, "model_structure.txt"), "w") as f:
+        #     f.write(str(self.model))
+        # pass
 
     def train(self):
         best_val_miou = 0
