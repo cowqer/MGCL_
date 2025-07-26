@@ -3,12 +3,23 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-import torch
-import torch.nn.functional as F
 
-import torch
-import torch.nn.functional as F
+class SelfGatingFusion(nn.Module):
+    def __init__(self, in_channels):
+        super().__init__()
+        self.gate_conv = nn.Sequential(
+            nn.Conv2d(in_channels * 2, in_channels, kernel_size=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(in_channels, in_channels, kernel_size=1),
+            nn.Sigmoid()
+        )
 
+    def forward(self, feat, prototype):
+        # feat, prototype: [B, C, H, W]
+        fused_input = torch.cat([feat, prototype], dim=1)  # [B, 2C, H, W]
+        gate = self.gate_conv(fused_input)                # [B, C, H, W]
+        out = gate * prototype + (1 - gate) * feat
+        return out
 def my_masked_average_pooling(feature, mask):
         b, c, w, h = feature.shape
         _, m, _, _ = mask.shape

@@ -24,7 +24,7 @@ def load_yaml_config(yaml_path):
     time_str = now.strftime("%m%d__%H_%M%S")
     
     # 以配置名作为目录名，再拼接时间戳
-    args.logpath = os.path.join("logs", yaml_base, f"{yaml_base}_{time_str}")
+    args.logpath = os.path.join(yaml_base, f"{yaml_base}_{time_str}")
 
     # 创建目录（如果 Logger 内部不处理的话）
     os.makedirs(args.logpath, exist_ok=True)

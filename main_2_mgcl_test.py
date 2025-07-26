@@ -1,7 +1,7 @@
 import torch
 import argparse
 from alisuretool.Tools import Tools
-from net.net_tools import *
+from net import *
 from util.util_tools import MyCommon, AverageMeter, Logger
 from dataset.dataset_tools import FSSDataset, Evaluator
 import yaml

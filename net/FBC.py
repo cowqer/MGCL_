@@ -45,24 +45,37 @@ class SegmentationHead_FBC(nn.Module):
         support_prototypes_fg = proto_fg
         support_prototypes_bg = proto_bg
 
-        query_feat = query_feats[2]  # 对应 query 的第三个尺度特征: [16, 2048, 8, 8]
+        alpha = 0.5
+        new_query_feats   = []
+        new_support_feats = []
 
-        prior_fg, prior_bg = compute_query_prior(query_feat, support_prototypes_fg, support_prototypes_bg)
-        prior = torch.sigmoid(prior_fg - prior_bg)
-        
-        # w_fg = torch.sigmoid(prior_fg)
-        # w_bg = torch.sigmoid(prior_bg)
-        # prior = w_fg / (w_fg + w_bg + 1e-8)
-        
-        query_prototypes_fg = get_query_foreground_prototype(query_feat, prior)  # [B, C]
-        prototype_fg = 0.5 * query_prototypes_fg + 0.5 * support_prototypes_fg
-        # print("prototype_fg", prototype_fg.shape)##([16, 4096])
+        for i, (q_feat, s_feat, supp_fg, supp_bg) in enumerate(zip(
+                query_feats, support_feats,
+                support_prototypes_fg, support_prototypes_bg)):
 
-        prototype_fg = prototype_fg.unsqueeze(-1).unsqueeze(-1)   # [16, 4096, 1, 1]
-        prototype_fg = prototype_fg.expand(-1, -1, 8, 8)    
-         
-        support_feats[2]= support_feats[2] + prototype_fg
-        
+            # 1. 计算 prior
+            prior_fg, prior_bg = compute_query_prior(q_feat, supp_fg, supp_bg)
+            prior = torch.sigmoid(prior_fg - prior_bg)
+
+            # 2. 计算 query 上的前景 prototype
+            query_proto_fg = get_query_foreground_prototype(q_feat, prior)  # [B, C]
+
+            # 3. 融合 support 和 query prototype
+            #    这里把 (1-α) 改成 1.0−alpha，对应你原来 0.5 * Q + 0.5 * S
+            proto_fg = alpha * query_proto_fg + (1.0 - alpha) * supp_fg  # [B, C]
+
+            # 4. reshape → [B, C, H, W]
+            B, C, H, W = q_feat.shape
+            proto_map = proto_fg.view(B, C, 1, 1).expand(B, C, H, W)
+
+            # 5. 累加到 query_feats[i] 和 support_feats[i]
+            new_query_feats.append  (q_feat + proto_map)
+            new_support_feats.append(s_feat + proto_map)
+
+        # 最后把更新后的 list 赋回去
+        query_feats   = new_query_feats
+        support_feats = new_support_feats
+
         # print("query_feats", [f.shape for f in query_feats])
         # FBC
         support_feats_fg = [self.label_feature(
