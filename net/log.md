@@ -1,7 +1,34 @@
-1. MGA: mask guided attention 
-2. ECM：Error Correction Module
-3. FBC: cat(foreground - backgroud , fore , back)
-4. HGG：Hyper Graph Guided
+## test日记
+
+| Method      | Fold 0 | Fold 1 | Fold 2 |  mean  |
+|-------------|--------|--------|--------|--------|
+| MGCL-office |  30.37 |  50.57 |  43.01 |  41.32 |
+| MGCL-ours-1 |  29.38 |  54.86 |  43.70 |  39.31 |
+| MGCL-ours-2 |  30.38 |  46.98 |  41.93 |  39.76 |
+| MGCL-ours-3 |  29.38 |  50.78 |  41.33 |  40.02 |
+
+| Method      | Fold 0 | Fold 1 | Fold 2 |  mean  |
+|-------------|--------|--------|--------|--------|
+|  FBC-1      |  26.00 |  48.20 | 43.97  |  41.32 |
+|  FBC-2      |        |  - | -  |  - |
+|  FBC-3      |   |   |   |   |
+
+### 1. MGA: mask guided attention 
+### 2. ECM：Error Correction Module
+### 3. FBC: cat(foreground - backgroud , fore , back)
+1. FBC
+
+选择第三层的特征基于mask average pooling 生成bg和fg的prior，bg-fg得到先验 加在了support和query的第三层特征上
+
+2. FBC_1:
+
+每层的特征用于每层的prior生成 其余相同
+
+2. FBC_2:
+
+
+
+### 4. HGG：Hyper Graph Guided
 
 
 ---
