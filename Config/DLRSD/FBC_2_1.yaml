@@ -2,8 +2,8 @@
 logpath: demo
 gpuid: 0
 bsz: 16
-epoch_num: 50
-fold: 2
+epoch_num: 100
+fold: 1
 backbone: resnet50
 finetune_backbone: true
 mask: true
@@ -17,6 +17,7 @@ max_steps: 200000
 nworker: 8
 img_size: 256
 use_original_imgsize: false
-net_name: MGSANetwork
+net_name: MG_FBC_2Network
 is_sgd: False
-###最后一位数字表fold的编号 倒数第二位表示model版本
+use_gpu: true
+shot: 1

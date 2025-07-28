@@ -47,7 +47,7 @@ def masked_avg_pool(feat, mask):
 
 def compute_cosine_similarity(query_feats, prototype):
     # query_feats: [B, C, H, W], prototype: [B, C]
-    print("compute_cosine_similarity", query_feats.shape, prototype.shape)
+    # print("compute_cosine_similarity", query_feats.shape, prototype.shape)
     B, C, H, W = query_feats.shape
     query_feats = F.normalize(query_feats, dim=1)  # [B, C, H, W]
     prototype = F.normalize(prototype, dim=1).view(B, C, 1, 1)  # [B, C, 1, 1]
