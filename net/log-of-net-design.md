@@ -1,11 +1,33 @@
 ## test，调参日志
+### MGCl
+<table>
+  <thead>
+    <tr>
+      <th rowspan="2">Method</th>
+      <th colspan="4">1-shot</th>
+      <th colspan="4">5-shot</th>
+    </tr>
+    <tr>
+      <th>Fold 0</th><th>Fold 1</th><th>Fold 2</th><th>mean</th>
+      <th>Fold 0</th><th>Fold 1</th><th>Fold 2</th><th>mean</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>MGCL-office</td><td>30.37</td><td>50.57</td><td>43.01</td><td>41.32</td><td>33.64</td><td>54.84</td><td>52.34</td><td>46.94</td>
+    </tr>
+    <tr>
+      <td>MGCL-ours-(1)</td><td>29.38</td><td>44.86</td><td>43.70</td><td>39.31</td><td>32.34</td><td>53.99</td><td>50.02</td><td>45.45</td>
+    </tr>
+    <tr>
+      <td>MGCL-ours-(2)</td><td>30.39</td><td>46.98</td><td>41.93</td><td>39.77</td><td>33.60</td><td>55.10</td><td>51.42</td><td>46.71</td>
+    </tr>
+    <tr>
+      <td>MGCL-ours-(3)</td><td>27.96</td><td>50.78</td><td>41.34</td><td>40.49</td><td>32.71</td><td>56.67</td><td>49.06</td><td>46.15</td>
+    </tr>
+  </tbody>
+</table>
 
-| Method      | Fold 0 | Fold 1 | Fold 2 |  mean  |
-|-------------|--------|--------|--------|--------|
-|MGCL-office  |`30.37` |`50.57` |`43.01` |`41.32` |
-|MGCL-ours-(1)|  29.38 |  44.86 |  43.70 |  39.31 |
-|MGCL-ours-(2)|  30.38 |  46.98 |  41.93 |  39.76 |
-|MGCL-ours-(3)|  29.38 |  50.78 |  41.33 |  40.49 |
 
 ### FBC
 
@@ -30,7 +52,12 @@
 |-------------|--------|--------|--------|--------|
 |  ~~FBC_1~~  | ~~20.24~~ | ~~44.03~~  | ~~33.17~~  |      -     |
 
-#### D 基于A ,将alpha系数改为基于self-gating获得
+#### D 加了temperate参数和两个dropout对应两个特征
+| Method-**b.** FBC_1| Fold 0 | Fold 1 | Fold 2 |  mean  |
+|-------------|--------|--------|--------|--------|
+|  FBC_1      | 31.95  | 43.37  | 41.62  | 38.98  |
+
+#### F 基于A ,将alpha系数改为基于self-gating获得
 | Method-FBC_2| Fold 0 | Fold 1 | Fold 2 |  mean  |
 |-------------|--------|--------|--------|--------|
 |  ~~FBC_2-(1)~~  | ~~30.00~~  | ~~46.08~~  | ~~43.09~~  |  ~~39.72~~ |
@@ -50,6 +77,7 @@
 
 - ~~a. 每层的特征用于每层的prior生成,其余相同,alpha也相同~~
 - ~~b. 只用当前层信息生成prior，仅用到低维的两个层级特征上~~
+
 
 3. FBC_2:
 

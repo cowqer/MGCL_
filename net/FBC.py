@@ -109,8 +109,8 @@ class SegmentationHead_FBC_1(SegmentationHead):
             support_feats[2]= support_feats[2] + prototype_fg
             query_feats[2] = query_feats[2] + prototype_fg
             
-            support_feats[2] = F.dropout(support_feats[2], p=0.2, training=self.training)
-            query_feats[2] = F.dropout(query_feats[2], p=0.2, training=self.training)
+            support_feats[2] = F.dropout(support_feats[2], p=0.1, training=self.training)
+            query_feats[2] = F.dropout(query_feats[2], p=0.1, training=self.training)
             # print("query_feats", [f.shape for f in query_feats])  # Debugging line to check shapes
             
             # FBC

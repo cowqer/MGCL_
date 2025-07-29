@@ -211,13 +211,12 @@ def my_parser_dlrsd():
 
 
 if __name__ == '__main__':
-    import argparse
-    parser = argparse.ArgumentParser(description='Specify YAML config file')
-    parser.add_argument('--config', type=str, required=True, help='Path to YAML config file')
-    args_cmd = parser.parse_args()
-    yaml_path = args_cmd.config
+    import sys
+    if len(sys.argv) != 2:
+        print("Usage: python train.py <config.yaml>")
+        exit(1)
 
+    yaml_path = sys.argv[1]
     args = load_yaml_config(yaml_path)
     runner = Runner(args=args)
     runner.train()
-    pass

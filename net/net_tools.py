@@ -118,8 +118,8 @@ class SegmentationHead(nn.Module):
         query_feats = [torch.concat([one, two], dim=1) for one, two in zip(query_feats, _query_feats)]
         support_feats = [torch.concat([one, two], dim=1) for one, two in zip(support_feats, _support_feats)]
         
-        print("query_feats after MGFEModule", [f.shape for f in query_feats])
-        print("support_feats after MGFEModule", [f.shape for f in support_feats])
+        # print("query_feats after MGFEModule", [f.shape for f in query_feats])
+        # print("support_feats after MGFEModule", [f.shape for f in support_feats])
         
         # FBC
         support_feats_fg = [self.label_feature(
