@@ -3,23 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-
-class SelfGatingFusion(nn.Module):
-    def __init__(self, in_channels):
-        super().__init__()
-        self.gate_conv = nn.Sequential(
-            nn.Conv2d(in_channels * 2, in_channels, kernel_size=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(in_channels, in_channels, kernel_size=1),
-            nn.Sigmoid()
-        )
-
-    def forward(self, feat, prototype):
-        # feat, prototype: [B, C, H, W]
-        fused_input = torch.cat([feat, prototype], dim=1)  # [B, 2C, H, W]
-        gate = self.gate_conv(fused_input)                # [B, C, H, W]
-        out = gate * prototype + (1 - gate) * feat
-        return out
 def my_masked_average_pooling(feature, mask):
         b, c, w, h = feature.shape
         _, m, _, _ = mask.shape
@@ -54,12 +37,12 @@ def compute_cosine_similarity(query_feats, prototype):
     sim_map = (query_feats * prototype).sum(dim=1, keepdim=True)  # [B, 1, H, W]
     return sim_map
 
-def compute_query_prior(query_feats, prototype_fg, prototype_bg):
+def compute_query_prior(query_feats, prototype_fg, prototype_bg, temperature=1.0):
 
     sim_fg = compute_cosine_similarity(query_feats, prototype_fg)  # [B, 1, H, W]
     sim_bg = compute_cosine_similarity(query_feats, prototype_bg)  # [B, 1, H, W]
     sim = torch.cat([sim_fg, sim_bg], dim=1)  # [B, 2, H, W]
-    prior = F.softmax(sim, dim=1)  # [B, 2, H, W]
+    prior = F.softmax(sim / temperature, dim=1)  # [B, 2, H, W]
     return prior[:, 0:1], prior[:, 1:2]  # foreground_prior, background_prior
 
 def get_query_foreground_prototype(query_feats, fg_prior):

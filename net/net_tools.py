@@ -207,7 +207,7 @@ class MGFEModule(object):
             enabled_feat = torch.div(feature_sum, sum_mask + 1e-8)#除以掩码像素数量（均值）
             enabled_feats.append(enabled_feat)
             pass
-        return enabled_feats
+        return enabled_feats 
 
     @staticmethod
     def my_masked_average_pooling(feature, mask):
