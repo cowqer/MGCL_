@@ -3,6 +3,34 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+def compute_similarity_alpha(query_feat, support_feat):
+    # Global average pooling
+    query_vec = F.adaptive_avg_pool2d(query_feat, 1).squeeze(-1).squeeze(-1)  # [B, C]
+    support_vec = F.adaptive_avg_pool2d(support_feat, 1).squeeze(-1).squeeze(-1)  # [B, C]
+
+    # Normalize for cosine
+    query_norm = F.normalize(query_vec, dim=1)
+    support_norm = F.normalize(support_vec, dim=1)
+
+    # Cosine similarity: [B]
+    cos_sim = (query_norm * support_norm).sum(dim=1)  # Higher is more similar → closer to 1
+
+    # Euclidean distance: [B]
+    l2_dist = (query_vec - support_vec).pow(2).sum(dim=1).sqrt()  # Higher is more dissimilar
+
+    # Normalize l2 distance to [0,1]
+    l2_dist = (l2_dist - l2_dist.min()) / (l2_dist.max() - l2_dist.min() + 1e-8)
+
+    # Combine (you can tune weights)
+    sim_score = 0.5 * cos_sim + 0.5 * (1 - l2_dist)  # Higher = more similar
+
+    # Convert to alpha: if sim high → alpha near 0.5, if sim low → alpha near 1
+    alpha = 1.0 - sim_score  # Higher sim → smaller alpha
+
+    # Clamp alpha to range [0.5, 1.0]
+    alpha = (alpha + 0.5) / 2 
+
+    return alpha  # shape: [B]
 def my_masked_average_pooling(feature, mask):
         b, c, w, h = feature.shape
         _, m, _, _ = mask.shape

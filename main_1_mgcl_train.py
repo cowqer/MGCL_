@@ -27,7 +27,7 @@ def load_yaml_config(yaml_path):
     args.logpath = os.path.join(yaml_base, f"{yaml_base}_{time_str}")
 
     # 创建目录（如果 Logger 内部不处理的话）
-    os.makedirs(args.logpath, exist_ok=True)
+    # os.makedirs(args.logpath, exist_ok=True)
 
     # 初始化 Logger
     Logger.initialize(args, training=True)

@@ -74,7 +74,19 @@ class SegmentationHead_FBC_1(SegmentationHead):
     def __init__(self):
         super().__init__()
         self.mgcd = MGCDModule([2, 2, 2])
+        self.alpha_gate = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),     # [B, C, H, W] -> [B, C, 1, 1]
+            nn.Flatten(),                # -> [B, C]
+            nn.Linear(4096, 1)           # -> [B, 1]
+        )
 
+        self.beta_gate = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Flatten(),
+            nn.Linear(4096, 1)
+        )
+        self.alpha = nn.Parameter(torch.tensor(0.0))  # 初始为 0，经sigmoid后为0.5
+        self.beta = nn.Parameter(torch.tensor(0.0))
         pass
 
     def forward(self, query_feats, support_feats, support_label, query_mask, support_masks):
@@ -94,23 +106,24 @@ class SegmentationHead_FBC_1(SegmentationHead):
             support_prototypes_fg = proto_fg
             support_prototypes_bg = proto_bg
 
-            alpha = 0.5
-            query_feat = query_feats[2]  # 取最后一层特征
+            query_feat_2 = query_feats[2]  # 取最后一层特征
+            support_feat_2 = support_feats[2]  # 取最后一层特征
             
-            prior_fg, prior_bg = compute_query_prior(query_feat, support_prototypes_fg, support_prototypes_bg, temperature=1.0)
+            alpha = torch.sigmoid(self.alpha_gate(query_feat_2))  # 变成 (0,1) 之间的标量
+            beta = torch.sigmoid(self.beta_gate(support_feat_2))  # 变成 (0,1) 之间的标量
+            # alpha = 0.5
+            # beta = 0.4
+            prior_fg, prior_bg = compute_query_prior(query_feat_2, support_prototypes_fg, support_prototypes_bg, temperature=1.0)
             prior = torch.sigmoid(prior_fg - prior_bg)
             
-            query_prototypes_fg = get_query_foreground_prototype(query_feat, prior)  # [B, C]
-            prototype_fg = 0.5 * query_prototypes_fg + (1.0 - alpha) * support_prototypes_fg
+            query_prototypes_fg = get_query_foreground_prototype(query_feat_2, prior)  # [B, C]
+            prototype_fg = alpha * query_prototypes_fg + beta * support_prototypes_fg
 
             prototype_fg = prototype_fg.unsqueeze(-1).unsqueeze(-1)   # [16, 4096, 1, 1]
             prototype_fg = prototype_fg.expand(-1, -1, 8, 8)    
             
             support_feats[2]= support_feats[2] + prototype_fg
             query_feats[2] = query_feats[2] + prototype_fg
-            
-            support_feats[2] = F.dropout(support_feats[2], p=0.1, training=self.training)
-            query_feats[2] = F.dropout(query_feats[2], p=0.1, training=self.training)
             # print("query_feats", [f.shape for f in query_feats])  # Debugging line to check shapes
             
             # FBC
@@ -128,13 +141,13 @@ class SegmentationHead_FBC_1(SegmentationHead):
             logit = self.mgcd(corr[::-1], query_mask)
             return logit
 
-
 class SegmentationHead_FBC_2(SegmentationHead):
 
     def __init__(self):
         super().__init__()
         self.mgcd = MGCDModule([2, 2, 2])
-        
+        self.reduce_2048 = nn.Conv2d(4096, 2048, kernel_size=1)
+        self.reduce_1024 = nn.Conv2d(4096, 1024, kernel_size=1)
         self.self_gate = nn.Sequential(
         nn.AdaptiveAvgPool2d(1),  # [B, C, 1, 1] —— 全局平均池化
         nn.Conv2d(4096, 1, kernel_size=1),  # 从通道数 C→1，C是query_feats[2]的通道数
@@ -159,16 +172,14 @@ class SegmentationHead_FBC_2(SegmentationHead):
             support_prototypes_fg = proto_fg
             support_prototypes_bg = proto_bg
 
-            alpha = self.self_gate(query_feats[2])  # [B, 1, 1, 1]
-            alpha = alpha.view(-1, 1)  # reshape to [B, 1] for prototype blending
-            
+            alpha = 0.4
             query_feat = query_feats[2]  # 取最后一层特征
             
             prior_fg, prior_bg = compute_query_prior(query_feat, support_prototypes_fg, support_prototypes_bg, temperature=1.0)
             prior = torch.sigmoid(prior_fg - prior_bg)
             
             query_prototypes_fg = get_query_foreground_prototype(query_feat, prior)  # [B, C]
-            prototype_fg = 0.5 * query_prototypes_fg + (1.0 - alpha) * support_prototypes_fg
+            prototype_fg = 0.5 * query_prototypes_fg + 0.6 * support_prototypes_fg
 
             prototype_fg = prototype_fg.unsqueeze(-1).unsqueeze(-1)   # [16, 4096, 1, 1]
             prototype_fg = prototype_fg.expand(-1, -1, 8, 8)    
