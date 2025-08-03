@@ -48,6 +48,8 @@
 
 0.5 0.4 
 |  FBC-(1)    |  28.98 |  46.47 |  44.07 |  - |
+0.5 0.6 
+|  FBC-(1)    |  29.32 |  46.28 |  42.91 |  - |
 
 #### B 每层的特征用于每层的prior生成,其余相同,alpha也相同
 | Method-**a.** FBC_1| Fold 0 | Fold 1 | Fold 2 |  mean  |
@@ -79,6 +81,11 @@
 |  ~~FBC_2-(2)~~  | ~~30.77~~  | ~~44.26~~  | ~~41.74~~  |  ~~38.92~~ |
 |  ~~FBC_2-(3)~~  | ~~28.44~~  | ~~46.18~~  | ~~39.99~~  |  ~~38.20~~ |
 
+#### G 基于A ,将alpha系数和beta系数改为基于self-gating获得
+
+| Method-FBC| Fold 0 | Fold 1 | Fold 2 |  mean  |
+|-----------|--------|--------|--------|--------|
+|30.81      | 30.81  |        |  42.50 |        |       
 ### 1. MGA: mask guided attention   
 ### 2. ECM：Error Correction Module
 ### 3. FBC: cat(foreground - backgroud , fore , back)

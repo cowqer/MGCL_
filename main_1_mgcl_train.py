@@ -7,7 +7,7 @@ from util.util_tools import MyCommon, MyOptim, AverageMeter, Logger
 import yaml
 import datetime
 import os
-
+import shutil
 
 def load_yaml_config(yaml_path):
     with open(yaml_path, 'r') as f:
@@ -26,8 +26,9 @@ def load_yaml_config(yaml_path):
     # 以配置名作为目录名，再拼接时间戳
     args.logpath = os.path.join(yaml_base, f"{yaml_base}_{time_str}")
 
-    # 创建目录（如果 Logger 内部不处理的话）
-    # os.makedirs(args.logpath, exist_ok=True)
+        # cls.logpath = os.path.join('logs', logpath + '.log')
+    args.loggerpath = os.path.join('logs', args.logpath+ '.log')
+    print(f"Log path: {args.logpath}")
 
     # 初始化 Logger
     Logger.initialize(args, training=True)
@@ -51,15 +52,13 @@ class Runner(object):
             args.benchmark, args.bsz, 8, args.fold, 'train', use_mask=args.mask, mask_num=args.mask_num)
         self.dataloader_val = FSSDataset.build_dataloader(
             args.benchmark, args.bsz, 8, args.fold, 'val', use_mask=args.mask, mask_num=args.mask_num)
-        os.makedirs(args.logpath, exist_ok=True)
-        
+        os.makedirs(args.loggerpath, exist_ok=True)
+        src_fbc_path = os.path.join("net", "FBC.py")
+        dst_fbc_path = os.path.join(args.loggerpath, "FBC.py")
+        shutil.copy(src_fbc_path, dst_fbc_path)
         # 记录模型结构到日志
         Logger.log_params(self.model)  # 如果Logger支持
-        # 或者直接写入文本文件
 
-        # with open(os.path.join(args.logpath, "model_structure.txt"), "w") as f:
-        #     f.write(str(self.model))
-        # pass
 
     def train(self):
         best_val_miou = 0
@@ -155,59 +154,6 @@ class Runner(object):
         return avg_loss, miou, fb_iou
 
     pass
-
-
-def my_parser_isaid():
-    # Arguments parsing
-    parser = argparse.ArgumentParser(description='MGCL Pytorch Implementation')
-
-    parser.add_argument('--logpath', type=str, default='demo')
-    parser.add_argument('--gpuid', type=int, default=0)
-    parser.add_argument('--bsz', type=int, default=16)
-    parser.add_argument('--fold', type=int, default=2, choices=[0, 1, 2])
-    parser.add_argument('--backbone', type=str, default='resnet50',
-                        choices=['vgg16', 'resnet50', 'resnet101'])
-    parser.add_argument("--finetune_backbone", type=bool, default=True)
-    parser.add_argument('--mask', type=bool, default=True)
-    parser.add_argument('--mask_num', type=int, default=128)
-
-    parser.add_argument('--datapath', type=str,
-                        default='/8T/data/ubuntu1080/FSS-RS/remote_sensing/iSAID_patches')
-    parser.add_argument('--benchmark', type=str, default='isaid', choices=['isaid', 'dlrsd'])
-    parser.add_argument('--is_sgd', type=bool, default=True)
-    parser.add_argument('--lr', type=float, default=1e-2)
-    parser.add_argument('--power', type=float, default=0.9)
-    parser.add_argument('--epoch_num', type=int, default=50)
-    parser.add_argument('--img_size', type=int, default=256)
-    args = parser.parse_args()
-    Logger.initialize(args, training=True)
-    return args
-
-
-def my_parser_dlrsd():
-    # Arguments parsing
-    parser = argparse.ArgumentParser(description='MGCL Pytorch Implementation')
-
-    parser.add_argument('--logpath', type=str, default='demo')
-    parser.add_argument('--gpuid', type=int, default=1)
-    parser.add_argument('--bsz', type=int, default=16)
-    parser.add_argument('--fold', type=int, default=2, choices=[0, 1, 2])
-    parser.add_argument('--backbone', type=str, default='resnet101',
-                        choices=['vgg16', 'resnet50', 'resnet101'])
-    parser.add_argument("--finetune_backbone", type=bool, default=True)
-    parser.add_argument('--mask', type=bool, default=True)
-    parser.add_argument('--mask_num', type=int, default=128)
-
-    parser.add_argument('--datapath', type=str, default='/8T/data/ubuntu1080/FSS-RS/DLRSD')
-    parser.add_argument('--benchmark', type=str, default='dlrsd', choices=['isaid', 'dlrsd'])
-    parser.add_argument('--is_sgd', type=bool, default=False)
-    parser.add_argument('--lr', type=float, default=1e-3)
-    parser.add_argument('--power', type=float, default=0.9)
-    parser.add_argument('--epoch_num', type=int, default=100)
-    parser.add_argument('--img_size', type=int, default=256)
-    args = parser.parse_args()
-    Logger.initialize(args, training=True)
-    return args
 
 
 if __name__ == '__main__':
