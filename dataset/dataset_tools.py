@@ -13,6 +13,7 @@ from alisuretool.Tools import Tools
 from torch.utils.data import Dataset
 from util.util_tools import MyCommon
 from torch.utils.data import DataLoader
+import tifffile
 
 
 class Evaluator:
@@ -395,29 +396,212 @@ class DatasetDLRSD(Dataset):
 
     pass
 
+class DatasetLCML(Dataset):
 
+    def __init__(self, datapath, fold, transform, split, shot, use_mask=False, mask_num=128):
+        self.split = 'val' if split in ['val', 'test'] else 'train'
+        self.fold = fold
+        self.nclass = 15
+        self.benchmark = 'lcml'
+        self.shot = shot
+        self.datapath = datapath
+        self.use_mask = use_mask # 是否使用预提取的 mask（如 SAM
+        self.mask_num = mask_num # 使用的最大 mask 数量
+
+        self.img_path = os.path.join(datapath, 'Images')
+        self.ann_path = os.path.join(datapath, 'Labels')
+        self.pkl_path = os.path.join(datapath, 'sam_mask_vit_h_t64_32_s50')
+
+        self.transform = transform
+        
+        self.img_metadata = self.build_img_metadata()
+        self.class_ids = self.build_class_ids()
+        self.img_metadata_classwise = self.build_img_metadata_classwise()
+        pass
+
+    def get_data_and_mask(self, pkl_name):
+        pkl = os.path.join(self.pkl_path, pkl_name + '.pkl')
+        with open(pkl, "rb") as f:
+            image_label_mask = pickle.load(f)
+
+        query_img = Image.fromarray(image_label_mask["image"])
+        query_label = Image.fromarray(image_label_mask["label"])
+        query_mask = np.asarray([MyCommon.rle_to_mask(one)
+                                 for one in image_label_mask["masks"]], dtype=np.int8)
+        return query_img, query_label, query_mask
+
+    def __len__(self):
+        return len(self.img_metadata)
+
+    def __getitem__(self, idx):
+        idx %= len(self.img_metadata)  # for testing, as n_images < 1000
+        query_name, support_names, class_sample = self.sample_episode(idx)
+        query_img, query_label, query_mask, support_imgs, support_labels_c, \
+        support_masks, org_qry_imsize = self.load_frame(query_name, support_names)
+
+        query_img = self.transform(query_img)
+        query_label = torch.tensor(np.array(query_label))
+        query_mask = torch.tensor(np.array(query_mask))
+
+        support_imgs = torch.stack([self.transform(support_img) for support_img in support_imgs])
+        support_labels_c = [torch.tensor(np.array(one)) for one in support_labels_c]
+        support_masks = [torch.tensor(np.array(one)) for one in support_masks]
+        support_masks = torch.stack(support_masks)
+
+        query_label = F.interpolate(query_label.unsqueeze(0).unsqueeze(0).float(),
+                                    query_img.size()[-2:], mode='nearest').squeeze()
+        query_label, query_ignore_idx = self.extract_ignore_idx(query_label.float(), class_sample)
+
+        support_labels, support_ignore_idxs = [], []
+        for slabel in support_labels_c:
+            slabel = F.interpolate(slabel.unsqueeze(0).unsqueeze(0).float(),
+                                   support_imgs.size()[-2:], mode='nearest').squeeze()
+            support_label, support_ignore_idx = self.extract_ignore_idx(slabel, class_sample)
+            support_labels.append(support_label)
+            support_ignore_idxs.append(support_ignore_idx)
+        support_labels = torch.stack(support_labels)
+        support_ignore_idxs = torch.stack(support_ignore_idxs)
+
+        batch = {'query_img': query_img,
+                 'query_label': query_label,
+                 'query_mask': query_mask[:self.mask_num],
+                 'query_name': query_name,
+                 'query_ignore_idx': query_ignore_idx,
+
+                 'org_query_imsize': org_qry_imsize,
+
+                 'support_imgs': support_imgs,
+                 'support_labels': support_labels,
+                 'support_masks': support_masks[:,:self.mask_num],
+                 'support_names': support_names,
+                 'support_ignore_idxs': support_ignore_idxs,
+
+                 'class_id': torch.tensor(class_sample)}
+        return batch
+
+    def extract_ignore_idx(self, label, class_id):
+        # label_np = np.array(label)
+        # print(f"[DEBUG] class_id: {class_id}, expected pixel: {class_id + 1}")
+        # print(f"[DEBUG] label unique pixel values: {np.unique(label_np)}")
+        boundary = (label / 255).floor()
+        label[label != class_id + 1] = 0
+        label[label == class_id + 1] = 1
+
+        return label, boundary
+
+    def load_frame(self, query_name, support_names):
+        if self.use_mask:
+            query_img, query_label, query_mask = self.get_data_and_mask(query_name)
+            _support_data = [self.get_data_and_mask(name) for name in support_names]
+            support_imgs = [one[0] for one in _support_data]
+            support_labels = [one[1] for one in _support_data]
+            support_masks = [one[2] for one in _support_data]
+        else:
+            query_img = self.read_img(query_name)
+            query_label = self.read_label(query_name)
+            query_mask = self.read_label(query_name)
+            support_imgs = [self.read_img(name) for name in support_names]
+            support_labels = [self.read_label(name) for name in support_names]
+            support_masks = [self.read_label(name) for name in support_names]
+            pass
+        return query_img, query_label, query_mask, \
+               support_imgs, support_labels, support_masks, query_img.size
+
+    def read_label(self, img_name):
+        path = os.path.join(self.ann_path, img_name[:-2], img_name) + '.png'
+        label_img = Image.open(path)
+        label_np = np.array(label_img)  # 保留调色板索引作为类别
+        return Image.fromarray(label_np.astype(np.uint8))  # 转成 Image，保持一致性
+
+
+
+    def read_img(self, img_name):
+        return Image.open(os.path.join(self.img_path, img_name[:-2], img_name) + '.tif')
+
+    def sample_episode(self, idx):
+        if self.split == "train":
+            class_sample = self.class_ids[idx % len(self.class_ids)]
+            query_name = np.random.choice(self.img_metadata_classwise[class_sample], 1, replace=False)[0]
+        else:
+            query_name, class_sample = self.img_metadata[idx]
+            pass
+
+        support_names = []
+        while True:  # keep sampling support set if query == support
+            support_name = np.random.choice(self.img_metadata_classwise[class_sample], 1, replace=False)[0]
+            if query_name != support_name: support_names.append(support_name)
+            if len(support_names) == self.shot: break
+            pass
+        return query_name, support_names, class_sample
+
+    def build_class_ids(self):
+        """
+        根据 txt 文件中实际出现的类别，构建 class_ids 列表
+        """
+        class_ids = sorted(list(set([cls for _, cls in self.img_metadata])))
+        return class_ids
+
+
+    def build_img_metadata(self):
+        split_file = os.path.join(self.datapath, f"{self.split}.txt")
+        img_metadata = []
+        with open(split_file, 'r') as f:
+            lines = f.read().splitlines()
+            for line in lines:
+                name, cls = line.split('__')
+                cls = int(cls)
+                # 只保留 1-15 类
+                if cls <= 15:
+                    img_metadata.append([name, cls - 1])  # 类别从 0 开始编号
+
+        print('Total (%s) images are : %d' % (self.split, len(img_metadata)))
+        return img_metadata
+
+
+    def build_img_metadata_classwise(self):
+        img_metadata_classwise = {cls: [] for cls in self.class_ids}
+        for img_name, img_class in self.img_metadata:
+            img_metadata_classwise[img_class].append(img_name)
+        return img_metadata_classwise
+
+    
 class FSSDataset(object):
 
     @classmethod
     def initialize(cls, img_size, datapath):
-        cls.datasets = {'isaid': DatasetISAID, 'dlrsd': DatasetDLRSD}
+        cls.datasets = {'isaid': DatasetISAID, 'dlrsd': DatasetDLRSD, 'lcml': DatasetLCML}
+
+        # 普通 3 通道数据集（RGB）均值/标准差
         cls.img_mean = [0.485, 0.456, 0.406]
-        cls.img_std = [0.229, 0.224, 0.225]
+        cls.img_std  = [0.229, 0.224, 0.225]
+
+        # LCML 5 波段数据集均值/标准差
+        cls.img_mean_lcml = [0.209, 0.394, 0.380, 0.344, 0.398]
+        cls.img_std_lcml  = [0.141, 0.027, 0.032, 0.046, 0.108]
+
+        # LCML 专用 transform
+
+
+        # 默认 transform（RGB 数据集）
+        cls.transform = transforms.Compose([
+            transforms.Resize((img_size, img_size)),
+            transforms.ToTensor(),
+            transforms.Normalize(cls.img_mean, cls.img_std)
+        ])
+
         cls.datapath = datapath
-        cls.transform = transforms.Compose([transforms.Resize(size=(img_size, img_size)),
-                                            transforms.ToTensor(),
-                                            transforms.Normalize(cls.img_mean, cls.img_std)])
-        pass
 
     @classmethod
     def build_dataloader(cls, benchmark, bsz, nworker, fold, split, shot=1, use_mask=False, mask_num=128):
         shuffle = split == 'train'
-        # nworker = nworker if split == 'train' else 0
+        transform = cls.transform
+        # 根据数据集选择 transform
+        # if benchmark == 'lcml':
+        #     transform = cls.transform_lcml
+        # else:
+        #     transform = cls.transform
 
-        dataset = cls.datasets[benchmark](cls.datapath, fold=fold, transform=cls.transform, split=split,
+        dataset = cls.datasets[benchmark](cls.datapath, fold=fold, transform=transform, split=split,
                                           shot=shot, use_mask=use_mask, mask_num=mask_num)
         dataloader = DataLoader(dataset, batch_size=bsz, shuffle=shuffle, num_workers=nworker)
         return dataloader
-
-    pass
-

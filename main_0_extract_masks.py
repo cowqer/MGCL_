@@ -25,7 +25,7 @@ class Config(object):
     gpu_id = "0"
     model_type = "vit_h"
     target_size = 64
-    points_per_side = 16
+    points_per_side = 32
     stability_score_thresh = 0.50
     data_root = "/data/seekyou/Data/iSAID"
     data_sam_mask_name = "sam_mask_{}_t{}_p{}_s{}".format(

@@ -205,6 +205,8 @@ class AverageMeter:
             self.nclass = 15
         elif self.benchmark == 'dlrsd':
             self.nclass = 15
+        elif self.benchmark == 'lcml':
+            self.nclass = 16
         elif self.benchmark == 'pascal':
             self.nclass = 20
         elif self.benchmark == 'coco':
