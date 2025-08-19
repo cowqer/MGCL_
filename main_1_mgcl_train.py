@@ -150,7 +150,11 @@ class Runner(object):
         # Write evaluation results
         average_meter.write_result('Validation', epoch)
         avg_loss = MyCommon.mean(average_meter.loss_buf)
-        miou, fb_iou = average_meter.compute_iou()
+        miou, fb_iou, iou_per_class, class_ids  = average_meter.compute_iou_class()
+        print(f"[Epoch {epoch}] Per-class IoU:")
+        for cid, iou in zip(class_ids, iou_per_class):
+            print(f"  Class {cid}: {iou.item():.2f}%")
+
         return avg_loss, miou, fb_iou
 
     pass
