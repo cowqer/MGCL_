@@ -435,6 +435,7 @@ class MG_FBC_4Network(MGCLNetwork):
         super().__init__(args)
         self.segmentation_head = SegmentationHead_FBC_4()  # Reuse SegmentationHead for MGSANet
         pass
+    
 class MG_FBC_5Network(MGCLNetwork):
     """
     MGSANet is a subclass of MGCLNetwork that implements the Multi-Granularity Attention Network.

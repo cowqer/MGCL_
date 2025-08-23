@@ -31,6 +31,7 @@ def compute_similarity_alpha(query_feat, support_feat):
     alpha = (alpha + 0.5) / 2 
 
     return alpha  # shape: [B]
+
 def my_masked_average_pooling(feature, mask):
         b, c, w, h = feature.shape
         _, m, _, _ = mask.shape

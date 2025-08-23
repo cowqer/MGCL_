@@ -205,8 +205,10 @@ class AverageMeter:
             self.nclass = 15
         elif self.benchmark == 'dlrsd':
             self.nclass = 15
-        elif self.benchmark == 'lcml':
-            self.nclass = 16
+        elif self.benchmark == 'lcma_plus':
+            self.nclass = 18
+        elif self.benchmark == 'lcma':
+            self.nclass = 18
         elif self.benchmark == 'pascal':
             self.nclass = 20
         elif self.benchmark == 'coco':
@@ -237,16 +239,34 @@ class AverageMeter:
 
         return miou, fb_iou
 
+    # def compute_iou_class(self):
+    #     iou = self.intersection_buf.float() / \
+    #           torch.max(torch.stack([self.union_buf, self.ones]), dim=0)[0]
+    #     iou = iou.index_select(1, self.class_ids_interest)
+    #     miou = iou[1].mean() * 100
+
+    #     fb_iou = (self.intersection_buf.index_select(1, self.class_ids_interest).sum(dim=1) /
+    #               self.union_buf.index_select(1, self.class_ids_interest).sum(dim=1)).mean() * 100
+
+    #     return miou, fb_iou, iou[1]
     def compute_iou_class(self):
+        # IoU = intersection / union
         iou = self.intersection_buf.float() / \
-              torch.max(torch.stack([self.union_buf, self.ones]), dim=0)[0]
+            torch.max(torch.stack([self.union_buf, self.ones]), dim=0)[0]
+
+        # 只取感兴趣的类别
         iou = iou.index_select(1, self.class_ids_interest)
+
+        # mean IoU
         miou = iou[1].mean() * 100
 
+        # FB-IoU
         fb_iou = (self.intersection_buf.index_select(1, self.class_ids_interest).sum(dim=1) /
-                  self.union_buf.index_select(1, self.class_ids_interest).sum(dim=1)).mean() * 100
+                self.union_buf.index_select(1, self.class_ids_interest).sum(dim=1)).mean() * 100
 
-        return miou, fb_iou, iou[1]
+        # ✅ 返回 class_ids，方便外部对应 id2name
+        return miou, fb_iou, iou[1], self.class_ids_interest
+
 
     def write_result(self, split, epoch):
         iou, fb_iou = self.compute_iou()

@@ -17,6 +17,6 @@ max_steps: 200000
 nworker: 8
 img_size: 256
 use_original_imgsize: false
-net_name: MGSANetwork
+net_name: MGCLNetwork
 is_sgd: False
 ###最后一位数字表fold的编号 倒数第二位表示model版本

@@ -27,7 +27,7 @@ class Config(object):
     target_size = 64
     points_per_side = 32
     stability_score_thresh = 0.50
-    data_root = "/data/seekyou/Data/lcml+data/I+L"
+    data_root = "/data/seekyou/Data/7class_LCML/Maping4DLRSD"
     data_sam_mask_name = "sam_mask_{}_t{}_p{}_s{}".format(
             model_type, target_size, points_per_side, int(stability_score_thresh * 100))
     # need to download from https://github.com/facebookresearch/segment-anything#model-checkpoints
