@@ -249,6 +249,17 @@ class AverageMeter:
     #               self.union_buf.index_select(1, self.class_ids_interest).sum(dim=1)).mean() * 100
 
     #     return miou, fb_iou, iou[1]
+    def compute_iou_class_orgin(self):
+        iou = self.intersection_buf.float() / \
+              torch.max(torch.stack([self.union_buf, self.ones]), dim=0)[0]
+        iou = iou.index_select(1, self.class_ids_interest)
+        miou = iou[1].mean() * 100
+
+        fb_iou = (self.intersection_buf.index_select(1, self.class_ids_interest).sum(dim=1) /
+                  self.union_buf.index_select(1, self.class_ids_interest).sum(dim=1)).mean() * 100
+
+        return miou, fb_iou, iou[1]
+    
     def compute_iou_class(self):
         # IoU = intersection / union
         iou = self.intersection_buf.float() / \

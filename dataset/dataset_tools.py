@@ -145,7 +145,19 @@ class DatasetISAID(Dataset):
         self.class_ids = self.build_class_ids()
         self.img_metadata = self.build_img_metadata()
         self.img_metadata_classwise = self.build_img_metadata_classwise()
+        self.id2name = self.build_id2name_mapping()
         pass
+    
+    def build_id2name_mapping(self):
+        """
+        根据 img_metadata 生成 class_id -> 类名 的映射
+        """
+        id2name = {}
+        for img_name, class_id in self.img_metadata:
+            class_name = img_name.split('__')[0]  # 文件名前缀作为类别名
+            id2name[class_id] = class_name
+            # print(f"Mapping class_id {class_id} to class_name {class_name}")
+        return id2name
 
     def get_data_and_mask(self, pkl_name):
         pkl = os.path.join(self.pkl_path, pkl_name) + '.pkl'

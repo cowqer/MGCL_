@@ -1,4 +1,5 @@
 vis/
+vis_results/
 logs/
 segment-anything-main/
 net/log-of-net-design.md

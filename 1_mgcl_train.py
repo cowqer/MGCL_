@@ -1,39 +1,9 @@
 import torch
 import argparse
 from alisuretool.Tools import Tools
-from net import *
+from net.net_tools import MGCLNetwork
 from dataset.dataset_tools import FSSDataset, Evaluator
 from util.util_tools import MyCommon, MyOptim, AverageMeter, Logger
-import yaml
-import datetime
-import os
-import shutil
-
-def load_yaml_config(yaml_path):
-    with open(yaml_path, 'r') as f:
-        cfg = yaml.safe_load(f)
-
-    import argparse
-    args = argparse.Namespace(**cfg)
-
-    # 获取yaml文件名（不含扩展名）
-    yaml_base = os.path.splitext(os.path.basename(yaml_path))[0]
-
-    # 自动生成 logpath，格式如 logs/config0/config0_0725__150310/
-    now = datetime.datetime.now()
-    time_str = now.strftime("%m%d__%H_%M%S")
-    
-    # 以配置名作为目录名，再拼接时间戳
-    args.logpath = os.path.join(yaml_base, f"{yaml_base}_{time_str}")
-
-        # cls.logpath = os.path.join('logs', logpath + '.log')
-    args.loggerpath = os.path.join('logs', args.logpath+ '.log')
-    print(f"Log path: {args.logpath}")
-
-    # 初始化 Logger
-    Logger.initialize(args, training=True)
-
-    return args
 
 
 class Runner(object):
@@ -42,9 +12,7 @@ class Runner(object):
         self.args = args
         self.device = MyCommon.gpu_setup(use_gpu=True, gpu_id=args.gpuid)
 
-        # 动态选择网络
-        net_cls = globals()[self.args.net_name] if hasattr(self.args, "net_name") else MGCLNetwork
-        self.model = net_cls(args).to(self.device)
+        self.model = MGCLNetwork(args).to(self.device)
         self.optimizer = MyOptim.get_finetune_optimizer(args, self.model)
 
         FSSDataset.initialize(img_size=args.img_size, datapath=args.datapath)
@@ -52,13 +20,9 @@ class Runner(object):
             args.benchmark, args.bsz, 8, args.fold, 'train', use_mask=args.mask, mask_num=args.mask_num)
         self.dataloader_val = FSSDataset.build_dataloader(
             args.benchmark, args.bsz, 8, args.fold, 'val', use_mask=args.mask, mask_num=args.mask_num)
-        os.makedirs(args.loggerpath, exist_ok=True)
-        src_fbc_path = os.path.join("net", "FBC.py")
-        dst_fbc_path = os.path.join(args.loggerpath, "FBC.py")
-        shutil.copy(src_fbc_path, dst_fbc_path)
-        # 记录模型结构到日志
-        Logger.log_params(self.model)  # 如果Logger支持
 
+        Logger.log_params(self.model)
+        pass
 
     def train(self):
         best_val_miou = 0
@@ -149,25 +113,67 @@ class Runner(object):
         # Write evaluation results
         average_meter.write_result('Validation', epoch)
         avg_loss = MyCommon.mean(average_meter.loss_buf)
-        # Per Class IoU
-        # miou, fb_iou, iou_per_class, class_ids  = average_meter.compute_iou_class()
-        # print(f"[Epoch {epoch}] Per-class IoU:")
-        # for cid, iou in zip(class_ids, iou_per_class):
-        #     print(f"  Class {cid}: {iou.item():.4f}")
-        
         miou, fb_iou = average_meter.compute_iou()
         return avg_loss, miou, fb_iou
 
     pass
 
 
-if __name__ == '__main__':
-    import sys
-    if len(sys.argv) != 2:
-        print("Usage: python train.py <config.yaml>")
-        exit(1)
+def my_parser_isaid():
+    # Arguments parsing
+    parser = argparse.ArgumentParser(description='MGCL Pytorch Implementation')
 
-    yaml_path = sys.argv[1]
-    args = load_yaml_config(yaml_path)
-    runner = Runner(args=args)
+    parser.add_argument('--logpath', type=str, default='demo')
+    parser.add_argument('--gpuid', type=int, default=0)
+    parser.add_argument('--bsz', type=int, default=16)
+    parser.add_argument('--fold', type=int, default=0, choices=[0, 1, 2])
+    parser.add_argument('--backbone', type=str, default='resnet50',
+                        choices=['vgg16', 'resnet50', 'resnet101'])
+    parser.add_argument("--finetune_backbone", type=bool, default=True)
+    parser.add_argument('--mask', type=bool, default=True)
+    parser.add_argument('--mask_num', type=int, default=128)
+
+    parser.add_argument('--datapath', type=str,
+                        default='/data/seekyou/Data/iSAID')
+    parser.add_argument('--benchmark', type=str, default='isaid', choices=['isaid', 'dlrsd'])
+    parser.add_argument('--is-sgd', type=bool, default=True)
+    parser.add_argument('--lr', type=float, default=1e-2)
+    parser.add_argument('--power', type=float, default=0.9)
+    parser.add_argument('--epoch_num', type=int, default=50)
+    parser.add_argument('--img_size', type=int, default=256)
+    args = parser.parse_args()
+    Logger.initialize(args, training=True)
+    return args
+
+
+def my_parser_dlrsd():
+    # Arguments parsing
+    parser = argparse.ArgumentParser(description='MGCL Pytorch Implementation')
+
+    parser.add_argument('--logpath', type=str, default='demo')
+    parser.add_argument('--gpuid', type=int, default=1)
+    parser.add_argument('--bsz', type=int, default=16)
+    parser.add_argument('--fold', type=int, default=2, choices=[0, 1, 2])
+    parser.add_argument('--backbone', type=str, default='resnet101',
+                        choices=['vgg16', 'resnet50', 'resnet101'])
+    parser.add_argument("--finetune_backbone", type=bool, default=True)
+    parser.add_argument('--mask', type=bool, default=True)
+    parser.add_argument('--mask_num', type=int, default=128)
+
+    parser.add_argument('--datapath', type=str, default='/8T/data/ubuntu1080/FSS-RS/DLRSD')
+    parser.add_argument('--benchmark', type=str, default='dlrsd', choices=['isaid', 'dlrsd'])
+    parser.add_argument('--is-sgd', type=bool, default=False)
+    parser.add_argument('--lr', type=float, default=1e-3)
+    parser.add_argument('--power', type=float, default=0.9)
+    parser.add_argument('--epoch_num', type=int, default=100)
+    parser.add_argument('--img_size', type=int, default=256)
+    args = parser.parse_args()
+    Logger.initialize(args, training=True)
+    return args
+
+
+if __name__ == '__main__':
+    runner = Runner(args=my_parser_isaid())
+    # runner = Runner(args=my_parser_dlrsd())
     runner.train()
+    pass

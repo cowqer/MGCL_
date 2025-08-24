@@ -78,78 +78,73 @@ class Runner(object):
         miou, fb_iou = average_meter.compute_iou()
         return miou, fb_iou
     
-
     @torch.no_grad()
-    def test_class(self):
+    def test_class(self, target_classes=None):
         dataloader = self.dataloader_val
         average_meter = AverageMeter(dataloader.dataset, device=self.device)
 
         for idx, batch in enumerate(dataloader):
             batch = MyCommon.to_cuda(batch, device=self.device)
-            # for k in batch.keys():
-            #     print(k)
             pred = self.model.predict_nshot(batch)
-            
-            Evaluator.visualize_batch_mask_only(pred, batch, save_dir="./vis_results", target_classes=[16,17])
+
+            # 只有指定了 --class 时才可视化
+            if target_classes is not None:
+                Evaluator.visualize_batch_mask_only(
+                    pred, batch, save_dir="./vis_results", target_classes=target_classes
+                )
 
             area_inter, area_union = Evaluator.classify_prediction(pred, batch)
             average_meter.update(area_inter, area_union, batch['class_id'], loss=None)
             average_meter.write_process(idx, len(dataloader), 0, write_batch_idx=5)
+
         miou, fb_iou, iou, class_ids = average_meter.compute_iou_class()
         return miou, fb_iou, iou, class_ids
 
+
 if __name__ == '__main__':
-    
     import sys
-    
-    if len(sys.argv) < 3 or len(sys.argv) > 4:
-        print("Usage: python test.py <config.yaml> <model_weights.pt> [shot]")
-        exit(1)
 
-    yaml_path = sys.argv[1]
-    model_path = sys.argv[2]
-    shot_val = int(sys.argv[3]) if len(sys.argv) == 4 else 1  # 默认1
+    parser = argparse.ArgumentParser()
+    parser.add_argument("config", type=str, help="YAML 配置文件路径")
+    parser.add_argument("weights", type=str, help="模型权重路径")
+    parser.add_argument("shot", type=int, nargs="?", default=None, help="few-shot 数量（可选）")
+    parser.add_argument("--class", type=int, nargs="+", dest="vis_classes", default=None,
+                        help="指定需要可视化的类别ID (例如: --class 7 8)")
+    args_cli = parser.parse_args()
 
-    args = load_yaml_config(yaml_path)
-    args.load = model_path  # 覆盖权重路径
-    args.shot = shot_val    # 用第三个参数覆盖shot
+    # 加载 yaml
+    args = load_yaml_config(args_cli.config)
+    args.load = args_cli.weights  # 覆盖权重路径
 
-    # 设置默认参数缺失（防止yaml中没写net_name）
+    # shot 参数优先级: CLI > yaml
+    if args_cli.shot is not None:
+        args.shot = args_cli.shot
+
+    # net_name 默认设置
     if not hasattr(args, 'net_name'):
-        Tools.print("Warning: net_name not specified in config! Plz check with your mzf eyes, using default.")
-        args.net_name = 'YourDefaultNetClassName'  # 请替换为你的默认网络类名
+        Tools.print("Warning: net_name not specified in config! Using default.")
+        args.net_name = 'YourDefaultNetClassName'
 
     MyCommon.fix_randseed(0)
     Logger.initialize(args, training=False)
     runner = Runner(args=args)
     Logger.log_params(runner.model)
 
-    miou, fb_iou, iou, class_ids = runner.test_class()
-    
-    # runner.test_vis(save_dir="./vis_results")
-    
+    # 调用 test_class（始终算 IoU），是否可视化由 --class 控制
+    miou, fb_iou, iou, class_ids = runner.test_class(target_classes=args_cli.vis_classes)
+
+    # 输出整体指标
     print("mIoU (mean):", miou.item() if torch.is_tensor(miou) else miou)
-
-    # Tools.print("FB-IoU:", fb_iou)
     print("FB-IoU:", fb_iou.item() if torch.is_tensor(fb_iou) else fb_iou)
-    Tools.print("Per-class IoU:")
-    
-# dataloader_val 是验证集的 dataloader
-    id2name = runner.dataloader_val.dataset.id2name
-    print("ID to Name Mapping:", id2name)
-  
 
+    # 输出每类指标
     Tools.print("Per-class IoU:")
+    id2name = runner.dataloader_val.dataset.id2name
     for class_id, class_iou in zip(class_ids.tolist(), iou):
         class_name = id2name.get(class_id, f"Class_{class_id}")
         print(f"{class_name} (id {class_id}): {class_iou.item():.4f}")
 
-
-
-
-# 这样就能看到每一类的 mIoU。
-
-
+    # 日志整理
     try:
         subprocess.run(["python", "./logs/organize_logs.py"], check=True)
         Tools.print("✅ 日志整理完成！")

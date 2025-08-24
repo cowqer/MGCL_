@@ -12,6 +12,7 @@ from alisuretool.Tools import Tools
 from torch.utils.data import Dataset
 import matplotlib.pyplot as plt
 sys.path.append("../segment-anything-main")
+
 from segment_anything import sam_model_registry
 from extractmasks.my_utils import my_masked_average_pooling
 from extractmasks.my_data.utils_rle import mask_to_rle_pytorch, rle_to_mask

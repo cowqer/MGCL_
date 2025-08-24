@@ -235,7 +235,7 @@ class SegmentationHead_FBC_3(SegmentationHead):
             alpha = 0.5
             beta = 1.0 - alpha
 
-            prior_fg, prior_bg = compute_query_prior(query_feat_2, support_prototypes_fg, support_prototypes_bg, temperature=0.9)
+            prior_fg, prior_bg = compute_query_prior(query_feat_2, support_prototypes_fg, support_prototypes_bg, temperature=1.1)
             prior = torch.sigmoid(prior_fg - prior_bg)
             
             query_prototypes_fg = get_query_foreground_prototype(query_feat_2, prior)  # [B, C]
