@@ -2,6 +2,21 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+class SpatialAttention(nn.Module):
+    """简单空间注意力模块"""
+    def __init__(self, kernel_size=7):
+        super().__init__()
+        self.conv = nn.Conv2d(2, 1, kernel_size=kernel_size, padding=kernel_size//2)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        # x: (B, C, H, W)
+        
+        avg_out = torch.mean(x, dim=1, keepdim=True)
+        max_out, _ = torch.max(x, dim=1, keepdim=True)
+        x_cat = torch.cat([avg_out, max_out], dim=1)  # (B,2,H,W)
+        attention = self.sigmoid(self.conv(x_cat))    # (B,1,H,W)
+        return attention
 
 def compute_similarity_alpha(query_feat, support_feat):
     # Global average pooling

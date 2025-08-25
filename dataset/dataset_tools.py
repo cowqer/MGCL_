@@ -15,7 +15,6 @@ from util.util_tools import MyCommon
 from torch.utils.data import DataLoader
 import tifffile
 
-
 class Evaluator:
     ignore_index = 255
 

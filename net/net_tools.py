@@ -107,12 +107,6 @@ class SegmentationHead(nn.Module):
     def forward(self, query_feats, support_feats, support_label, query_mask, support_masks):
         # MGFE
 
-        ##query_feats shapes: [torch.Size([16, 512, 32, 32]), torch.Size([16, 1024, 16, 16]), torch.Size([16, 2048, 8, 8])]
-        ##support_feats shapes: [torch.Size([16, 512, 32, 32]), torch.Size([16, 1024, 16, 16]), torch.Size([16, 2048, 8, 8])]
-        
-        ##query_feats after MGFEModule [torch.Size([16, 1024, 32, 32]), torch.Size([16, 2048, 16, 16]), torch.Size([16, 4096, 8, 8])]
-        ##support_feats after MGFEModule [torch.Size([16, 1024, 32, 32]), torch.Size([16, 2048, 16, 16]), torch.Size([16, 4096, 8, 8])]
-        
         _query_feats, _support_feats = MGFEModule.update_feature(query_feats, support_feats, query_mask, support_masks)
         
         query_feats = [torch.concat([one, two], dim=1) for one, two in zip(query_feats, _query_feats)]
@@ -188,9 +182,11 @@ class MGFEModule(object):
         index_mask = torch.zeros_like(masks[:, 0]).long() + m
         for i in range(m):
             index_mask[masks[:, i]==1] = i
-        masks = torch.nn.functional.one_hot(index_mask)[:, :, :, :m].permute((0, 3, 1, 2))##这一步能将一个像素只属于一个区域的硬掩码明确表示为 one-hot。
+        masks = torch.nn.functional.one_hot(index_mask)[:, :, :, :m].permute((0, 3, 1, 2))
+        ##这一步能将一个像素只属于一个区域的硬掩码明确表示为 one-hot。
 
         enabled_feats = []
+        
         for feat in feats:
             target_masks = F.interpolate(masks.float(), feat.shape[-2:], mode='nearest')##将掩码插值到特征图的空间尺寸
             # 计算每个区域的特征的平均值

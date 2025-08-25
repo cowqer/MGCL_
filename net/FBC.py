@@ -384,6 +384,7 @@ class SegmentationHead_FBC_5(SegmentationHead):
             # MGCD
             logit = self.mgcd(corr[::-1], query_mask)
             return logit
+        
 class MG_FBCNetwork(MGCLNetwork):
     """
     MGSANet is a subclass of MGCLNetwork that implements the Multi-Granularity Attention Network.
