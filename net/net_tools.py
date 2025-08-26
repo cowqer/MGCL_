@@ -10,11 +10,44 @@ from torch.utils.data import Dataset
 from .modules import *
 
 class MGCDModule(nn.Module):
+    """
+    MGCD (Multi-Granularity Correlation Decoder)：
+    - 输入：来自多层(FPN式)的 4D 相关张量金字塔 hypercorr_pyramid，形状依次为 [B, C, Ha, Wa, Hb, Wb]
+      其中 (Ha, Wa) 是 Query 空间，(Hb, Wb) 是 Support 空间。
+    - 作用：
+        1) Squeezing：对每层 4D 相关张量做多层 4D 卷积降维/提取表征；
+        2) Mixing：把高层 4D 表征对齐到低层 Query 尺度，逐级融合；
+        3) Reduce 4D -> 2D：把 support 维度 (Hb, Wb) 做统计（mean），得到 2D 的 Query 特征；
+        4)（可选）MGFE 引导增强（与 Query mask 结合）；
+        5) Decoder：2D 卷积 + 上采样，输出二分类的语义分割 logit。
+    - 输出：logit，形状为 [B, 2, H, W]（最终分割的前景/背景两通道）。
+    """
 
     def __init__(self, inch):
+        """
+        参数
+        ----
+        inch : list[int]
+            与输入金字塔各层通道数对应的列表（例如 [2, 2, 2]），即每层 4D 相关张量的 C。
+        """
         super().__init__()
 
         def make_building_block(in_channel, out_channels, kernel_sizes, spt_strides, group=4):
+            """
+            构造由若干个 4D 卷积 + GroupNorm + ReLU 组成的子序列。
+            - in_channel: 输入通道 C_in（4D 卷积的输入通道）
+            - out_channels: List，每个阶段的输出通道数
+            - kernel_sizes: List，每个阶段 4D 卷积的空间核大小（这里对 4 个维度共用同一个标量）
+            - spt_strides: List，每个阶段在“Query 空间维 (Ha, Wa)”上的 stride（前两个 stride 固定为1）
+            - group: GroupNorm 的分组数（要求 out_channel 能被 group 整除）
+            
+            形状约定（CenterPivotConv4d）：
+            输入: [B, C_in, Ha, Wa, Hb, Wb]
+            卷积核: (k_a, k_a, k_b, k_b)  # 这里展开为 ksz4d=(ksz, ksz, ksz, ksz)
+            stride: (1, 1, stride, stride) # 只在 Query 空间(Ha, Wa)做下采样；Support 空间保持
+            padding: (ksz//2, ksz//2, ksz//2, ksz//2) # 保持两空间“同长对齐”的填充
+            输出: [B, C_out, Ha', Wa', Hb, Wb]
+            """
             assert len(out_channels) == len(kernel_sizes) == len(spt_strides)
 
             building_block_layers = []

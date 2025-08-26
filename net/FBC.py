@@ -287,6 +287,7 @@ class SegmentationHead_FBC_4(SegmentationHead):
             proto_fg = masked_avg_pool(feat, label)            # 前景 prototype: [16, 2048]
             proto_bg = masked_avg_pool(feat, 1 - label)        # 背景 prototype: [16, 2048]
 
+            #*产生support的前景prototype
             support_prototypes_fg = proto_fg
             support_prototypes_bg = proto_bg
 
@@ -298,16 +299,17 @@ class SegmentationHead_FBC_4(SegmentationHead):
 
             prior_fg, prior_bg = compute_query_prior(query_feat_2, support_prototypes_fg, support_prototypes_bg, temperature=0.8)
             prior = torch.sigmoid(prior_fg - prior_bg)
-            
+            #*产生query的前景prototype
             query_prototypes_fg = get_query_foreground_prototype(query_feat_2, prior)  # [B, C]
+            #*选择性融合得到前景的prototype
             prototype_fg = alpha * query_prototypes_fg + beta * support_prototypes_fg
-
+            
             prototype_fg = prototype_fg.unsqueeze(-1).unsqueeze(-1)   # [16, 4096, 1, 1]
             prototype_fg = prototype_fg.expand(-1, -1, 8, 8)    
-            
+            #*对support和query的的最后一层特征进行前景增强
             support_feats[2]= support_feats[2] + prototype_fg
             query_feats[2] = query_feats[2] + prototype_fg
-            # print("query_feats", [f.shape for f in query_feats])  # Debugging line to check shapes
+
             
             # FBC
             support_feats_fg = [self.label_feature(
