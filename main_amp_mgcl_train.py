@@ -18,11 +18,15 @@ def load_yaml_config(yaml_path):
     yaml_base = os.path.splitext(os.path.basename(yaml_path))[0]
     now = datetime.datetime.now()
     time_str = now.strftime("%m%d__%H_%M%S")
-    args.logpath = os.path.join(yaml_base, f"{yaml_base}_{time_str}")
+
+    # 添加 amp 标识
+    args.logpath = os.path.join(yaml_base, f"{yaml_base}_amp_{time_str}")
     args.loggerpath = os.path.join('logs', args.logpath + '.log')
+
     print(f"Log path: {args.logpath}")
     Logger.initialize(args, training=True)
     return args
+
 
 
 class Runner(object):

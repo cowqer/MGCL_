@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+from .net_tools import MGCDModule, MGFEModule
 
 class MGFEModuleV2(object):
     """
@@ -100,3 +100,54 @@ class MGFEModuleV2(object):
             pooled.append(topk_val.mean(dim=1))
         pooled = torch.stack(pooled, dim=1)
         return pooled
+
+class CDModule(MGCDModule):
+    """
+    改进版 MGCD 模块，支持选择性池化
+    """
+
+    def __init__(self, inch):
+        super().__init__(inch)
+        self.decoder1 = nn.Sequential(
+            nn.Conv2d(128, 64, (3, 3), padding=(1, 1), bias=True), nn.ReLU(),
+            nn.Conv2d(64, 32, (3, 3), padding=(1, 1), bias=True), nn.ReLU())
+        self.decoder1_my = nn.Sequential(
+            nn.Conv2d(64, 32, (3, 3), padding=(1, 1), bias=True), nn.ReLU(),
+            nn.Conv2d(32, 32, (3, 3), padding=(1, 1), bias=True), nn.ReLU())
+    def forward(self, hypercorr_pyramid, query_mask=None):
+        # Encode hypercorrelations from each layer (Squeezing building blocks)
+        hypercorr_sqz4 = self.encoder_layer4(hypercorr_pyramid[0])
+        hypercorr_sqz3 = self.encoder_layer3(hypercorr_pyramid[1])
+        hypercorr_sqz2 = self.encoder_layer2(hypercorr_pyramid[2])
+
+        # Propagate encoded 4D-tensor (Mixing building blocks)
+        hypercorr_sqz4 = self.interpolate_support_dims(hypercorr_sqz4, hypercorr_sqz3.size()[-4:-2])
+        hypercorr_mix43 = hypercorr_sqz4 + hypercorr_sqz3
+        hypercorr_mix43 = self.encoder_layer4to3(hypercorr_mix43)
+
+        hypercorr_mix43 = self.interpolate_support_dims(hypercorr_mix43, hypercorr_sqz2.size()[-4:-2])
+        hypercorr_mix432 = hypercorr_mix43 + hypercorr_sqz2
+        hypercorr_mix432 = self.encoder_layer3to2(hypercorr_mix432)
+
+        bsz, ch, ha, wa, hb, wb = hypercorr_mix432.size()
+        hypercorr_encoded = hypercorr_mix432.view(bsz, ch, ha, wa, -1).mean(dim=-1)
+
+        if query_mask is not None:
+            # MGFE
+            # _hypercorr_encoded = MGFEModule.update_feature_one(hypercorr_encoded, query_mask)
+            # hypercorr_encoded = torch.concat([hypercorr_encoded, _hypercorr_encoded], dim=1)
+            hypercorr_encoded = torch.concat([hypercorr_encoded, hypercorr_encoded], dim=1)
+        else:
+            hypercorr_encoded = torch.concat([hypercorr_encoded, hypercorr_encoded], dim=1)
+            pass
+
+        # Decode the encoded 4D-tensor
+        hypercorr_decoded = self.decoder1(hypercorr_encoded)
+        # hypercorr_decoded = self.decoder1_my(hypercorr_decoded)
+        upsample_size = (hypercorr_decoded.size(-1) * 2,) * 2
+        hypercorr_decoded = F.interpolate(hypercorr_decoded, upsample_size,
+                                          mode='bilinear', align_corners=True)
+        logit = self.decoder2(hypercorr_decoded)
+        return logit
+
+    pass

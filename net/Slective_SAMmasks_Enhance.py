@@ -30,8 +30,8 @@ class SegmentationHeadV2(SegmentationHead):
         
         # support_feat0, support_feat1,support_feat2 = support_feats[0],support_feats[1],support_feats[2]
         # query_feats0, support_feat1, support_feat2 = query_feats[0],query_feats[1],query_feats[2]
-        MGFEModuleV2.pool_mode = 'topk'
-        MGFEModuleV2.topk = 10
+        MGFEModuleV2.pool_mode = 'avg'
+
         # 2️⃣ 调用 update_feature
         _query_feats, _support_feats = MGFEModuleV2.update_feature(query_feats, support_feats, query_mask, support_masks)
         # _query_feats, _support_feats = MGFEModuleV2.update_feature(query_feats, support_feats, query_mask, support_masks,attn_support, attn_query)

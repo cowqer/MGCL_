@@ -242,12 +242,10 @@ class MGFEModule(object):
     def my_masked_average_pooling(feature, mask):
         b, c, w, h = feature.shape
         _, m, _, _ = mask.shape
-
         _mask = mask.view(b, m, -1)
         _feature = feature.view(b, c, -1).permute(0, 2, 1).contiguous()
         feature_sum = _mask @ _feature
         masked_sum = torch.sum(_mask, dim=2, keepdim=True)
-
         masked_average_pooling = torch.div(feature_sum, masked_sum + 1e-8)
         return masked_average_pooling
 
