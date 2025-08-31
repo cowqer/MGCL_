@@ -3,10 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.models import resnet
 from torchvision.models import vgg
-from typing_extensions import override
-import PIL.Image as Image
-import torchvision.transforms.v2 as transforms2
-from torch.utils.data import Dataset
+
 from .modules import *
 
 class MGCDModule(nn.Module):

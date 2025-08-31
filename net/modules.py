@@ -2,21 +2,80 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class SpatialAttention(nn.Module):
-    """简单空间注意力模块"""
-    def __init__(self, kernel_size=7):
+class MaskSobelFusion(nn.Module):
+    def __init__(self, init_alpha=1.0, init_beta=0.5):
         super().__init__()
-        self.conv = nn.Conv2d(2, 1, kernel_size=kernel_size, padding=kernel_size//2)
-        self.sigmoid = nn.Sigmoid()
-
-    def forward(self, x):
-        # x: (B, C, H, W)
+        # 可学习参数，初始值可调
         
-        avg_out = torch.mean(x, dim=1, keepdim=True)
-        max_out, _ = torch.max(x, dim=1, keepdim=True)
-        x_cat = torch.cat([avg_out, max_out], dim=1)  # (B,2,H,W)
-        attention = self.sigmoid(self.conv(x_cat))    # (B,1,H,W)
-        return attention
+        self.alpha = nn.Parameter(torch.tensor(init_alpha, dtype=torch.float32))
+        self.beta  = nn.Parameter(torch.tensor(init_beta, dtype=torch.float32))
+
+    def forward(self, mask):
+        """
+        mask: [B, N, H, W]
+        return: [B,1,H,W] 融合结果
+        """
+        grad_mag = self.mask_sobel(mask)  # [B,N,H,W]
+
+        # 确保权重为正，可选归一化
+        alpha = torch.clamp(self.alpha, 0, 1)
+        beta  = torch.clamp(self.beta, 0, 1)
+
+        combined = alpha * mask + beta * grad_mag
+        combined_merged = combined.mean(dim=1, keepdim=True)  # 多 mask 合并
+        return combined_merged
+
+    @staticmethod
+    def mask_sobel(mask):
+        sobel_x = torch.tensor([[-1,0,1],[-2,0,2],[-1,0,1]], dtype=torch.float32, device=mask.device).view(1,1,3,3)
+        sobel_y = torch.tensor([[-1,-2,-1],[0,0,0],[1,2,1]], dtype=torch.float32, device=mask.device).view(1,1,3,3)
+
+        B, N, H, W = mask.shape
+        mask = mask.view(B*N, 1, H, W)
+
+        grad_x = F.conv2d(mask, sobel_x, padding=1)
+        grad_y = F.conv2d(mask, sobel_y, padding=1)
+
+        grad_mag = torch.sqrt(grad_x**2 + grad_y**2)
+        grad_mag = grad_mag.view(B, N, H, W)
+        return grad_mag
+    
+def FGE( query_feats, support_feats, support_label, query_mask, alpha=0.5):
+    """
+    Foreground-Guilded Enhancement (FPG)
+    """
+    # [B,1,H,W]
+    label = support_label.unsqueeze(1)
+
+    # 取最后一层 support/query 特征
+    query_feat_2 = query_feats[2]        # [B, C, H, W]
+    support_feat_2 = support_feats[2]    # [B, C, H, W]
+
+    # 支持图前景/背景 prototype
+    proto_fg = masked_avg_pool(support_feat_2, label)       # [B, C]
+    proto_bg = masked_avg_pool(support_feat_2, 1 - label)   # [B, C]
+
+    # Query prior
+    prior_fg, prior_bg = compute_query_prior(query_feat_2, proto_fg, proto_bg, temperature=1.1)
+    prior = torch.sigmoid(prior_fg - prior_bg)
+
+    # query prototype
+    query_proto_fg = get_query_foreground_prototype(query_feat_2, prior)  # [B, C]
+
+    # 融合 support & query prototype
+    beta = 1.0 - alpha
+    prototype_fg = alpha * query_proto_fg + beta * proto_fg   # [B, C]
+
+    # 映射成 feature map
+    B, C, H, W = query_feat_2.shape
+    prototype_fg = prototype_fg.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, H, W)  # [B, C, H, W]
+
+    # 融合到原始特征
+    support_feats[2] = support_feats[2] + prototype_fg
+    query_feats[2] = query_feats[2] + prototype_fg
+
+    return query_feats, support_feats
+
 
 def compute_similarity_alpha(query_feat, support_feat):
     # Global average pooling
@@ -60,6 +119,7 @@ def my_masked_average_pooling(feature, mask):
         return masked_average_pooling
 
 pass
+
 def masked_avg_pool(feat, mask):
     # feat: [B, C, H, W]
     # mask: [B, 1, H_img, W_img] -> 需要下采样到 [B, 1, H, W]
@@ -150,60 +210,3 @@ class CenterPivotConv4d(nn.Module):
 
     pass
 
-
-
-class HyperGraphBuilder:
-    def __init__(self, epsilon=0.5, device='cpu'):
-        """
-        初始化超图构建器
-        :param epsilon: 特征空间中的ϵ-ball阈值
-        :param device: 计算设备（'cpu'或'cuda'）
-        """
-        self.epsilon = epsilon
-        self.device = device
-
-    def fuse_multiscale_features(self, feature_list):
-        """
-        融合来自多个层次的特征图（通道维拼接）
-        :param feature_list: list of tensors [B, C_i, H_i, W_i]
-        :return: fused feature map [B, C_total, H, W]
-        """
-        # 对所有特征图上采样至第一个特征图的空间尺寸
-        target_size = feature_list[0].shape[2:]
-        resized = [F.interpolate(f, size=target_size, mode='bilinear', align_corners=False)
-                   for f in feature_list]
-        fused = torch.cat(resized, dim=1)  # 通道维拼接
-        return fused
-
-    def build_hypergraph(self, fused_feats):
-        """
-        构建超图结构（每个位置为顶点，通过ϵ-ball方式连边）
-        :param fused_feats: [B, C, H, W] 融合后的特征图
-        :return: list of H (B 个样本的超图关联矩阵)
-        """
-        B, C, H, W = fused_feats.shape
-        N = H * W
-        fused_feats = fused_feats.view(B, C, N).permute(0, 2, 1)  # [B, N, C]
-        
-        hypergraphs = []
-
-        for b in range(B):
-            feat = fused_feats[b]  # [N, C]
-            dist = torch.cdist(feat, feat, p=2)  # [N, N] 欧式距离
-            hyperedges = []
-
-            for i in range(N):
-                neighbors = torch.where(dist[i] < self.epsilon)[0]
-                if len(neighbors) > 0:
-                    hyperedges.append(neighbors)
-
-            # 构建关联矩阵 H ∈ [N, E]，E 为超边数
-            E = len(hyperedges)
-            H = torch.zeros(N, E, device=self.device)
-
-            for e_idx, node_indices in enumerate(hyperedges):
-                H[node_indices, e_idx] = 1.0
-
-            hypergraphs.append(H)
-
-        return hypergraphs

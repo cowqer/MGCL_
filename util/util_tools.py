@@ -207,8 +207,8 @@ class AverageMeter:
             self.nclass = 15
         elif self.benchmark == 'lcma_plus':
             self.nclass = 18
-        elif self.benchmark == 'lcma':
-            self.nclass = 18
+        # elif self.benchmark == 'lcma':
+        #     self.nclass = 18
         elif self.benchmark == 'pascal':
             self.nclass = 20
         elif self.benchmark == 'coco':

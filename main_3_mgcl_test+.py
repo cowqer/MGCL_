@@ -7,10 +7,13 @@ from dataset.dataset_tools import FSSDataset, Evaluator
 import yaml
 import os
 import subprocess
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 import os
+# from torchsummary import summary
+
+# 例如输入是 (3, 224, 224)，你要根据你的模型输入改
 
 palette = {
     1: [166, 202, 240], 2: [128,128,0], 3: [0,0,128], 4: [255,0,0],
@@ -129,6 +132,8 @@ if __name__ == '__main__':
     Logger.initialize(args, training=False)
     runner = Runner(args=args)
     Logger.log_params(runner.model)
+    # Tools.print("Model Architcture:\n")
+    # Tools.print(str(runner.moedel))
 
     # 调用 test_class（始终算 IoU），是否可视化由 --class 控制
     miou, fb_iou, iou, class_ids = runner.test_class(target_classes=args_cli.vis_classes)
