@@ -6,6 +6,8 @@ from .modules import CenterPivotConv4d
 from torchvision.models import resnet
 from torchvision.models import vgg
 
+
+
 class SegmentationHead_baseline(nn.Module):
     """
     SegmentationHead_FBC_MGCL is a subclass of SegmentationHead_FBC that implements the Multi-Granularity Attention Network.
@@ -128,13 +130,18 @@ class CDModule(nn.Module):
         self.decoder1 = nn.Sequential(
             nn.Conv2d(outch4, outch3, (3, 3), padding=(1, 1), bias=True), nn.ReLU(),
             nn.Conv2d(outch3, outch2, (3, 3), padding=(1, 1), bias=True), nn.ReLU())
+        #! 别删 之前训练的有部分初始化了这段 评估报错就取消这个注释
         self.decoder1_my = nn.Sequential(
             nn.Conv2d(64, 32, (3, 3), padding=(1, 1), bias=True), nn.ReLU(),
             nn.Conv2d(32, 32, (3, 3), padding=(1, 1), bias=True), nn.ReLU())
         self.decoder2 = nn.Sequential(
             nn.Conv2d(outch2, outch1, (3, 3), padding=(1, 1), bias=True), nn.ReLU(),
             nn.Conv2d(outch1, 2, (3, 3), padding=(1, 1), bias=True))
+        
+        self.SSblock = None
+        
         pass
+    
 
     def interpolate_support_dims(self, hypercorr, spatial_size=None):
         bsz, ch, ha, wa, hb, wb = hypercorr.size()
@@ -167,8 +174,9 @@ class CDModule(nn.Module):
         else:
             hypercorr_encoded = torch.concat([hypercorr_encoded, hypercorr_encoded], dim=1)
             pass
+        #! SSblock
+        hypercorr_encoded = self.SSblock(hypercorr_encoded) if self.SSblock is not None else hypercorr_encoded
 
-        # Decode the encoded 4D-tensor
         hypercorr_decoded = self.decoder1(hypercorr_encoded)
         upsample_size = (hypercorr_decoded.size(-1) * 2,) * 2
         hypercorr_decoded = F.interpolate(hypercorr_decoded, upsample_size,

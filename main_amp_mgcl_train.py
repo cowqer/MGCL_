@@ -1,6 +1,6 @@
 import torch 
 import argparse
-from torch.cuda.amp import autocast, GradScaler
+from torch import amp
 from alisuretool.Tools import Tools
 from net import *
 from dataset.dataset_tools import FSSDataset, Evaluator
@@ -35,7 +35,7 @@ class Runner(object):
         self.args = args
         self.device = MyCommon.gpu_setup(use_gpu=True, gpu_id=args.gpuid)
 
-        net_cls = globals()[self.args.net_name] if hasattr(self.args, "net_name") else MGCLNetwork
+        net_cls = globals()[self.args.net_name] if hasattr(self.args, "net_name") else myNetwork
         self.model = net_cls(args).to(self.device)
         self.optimizer = MyOptim.get_finetune_optimizer(args, self.model)
 
@@ -49,17 +49,21 @@ class Runner(object):
         Logger.log_params(self.model)
 
         # 初始化 GradScaler
-        self.scaler = GradScaler()
+        self.scaler = amp.GradScaler("cuda")
 
     def train(self):
         best_val_miou = 0
         for epoch in range(self.args.epoch_num):
-            Tools.print(f"begin epoch {epoch} train")
+
+            # Tools.print(f"[{now_str}] begin epoch {epoch} train")
+            Logger.info(f"===== [Epoch {epoch}] Begin Train =====")
             MyOptim.adjust_learning_rate_poly(self.args, self.optimizer, epoch, self.args.epoch_num)
 
             train_loss, train_miou, train_fb_iou = self.train_one_epoch(epoch, self.dataloader_train)
 
-            Tools.print(f"begin epoch {epoch} test")
+            # Tools.print(f"[{now_str}] begin epoch {epoch} test")
+            
+            Logger.info(f"===== [Epoch {epoch}] Begin Validation =====")
             with torch.no_grad():
                 val_loss, val_miou, val_fb_iou = self.test_one_epoch(epoch, self.dataloader_val)
 
@@ -81,7 +85,7 @@ class Runner(object):
             batch = MyCommon.to_cuda(batch, device=self.device)
             self.optimizer.zero_grad()
 
-            with autocast():  # AMP 前向
+            with amp.autocast("cuda"):  # AMP 前向
                 logit = self.model(batch['query_img'], batch['support_imgs'].squeeze(1), batch['support_labels'].squeeze(1),
                                    query_mask=batch['query_mask'] if 'query_mask' in batch else None,
                                    support_masks=batch['support_masks'].squeeze(1) if 'support_masks' in batch else None)
@@ -104,10 +108,11 @@ class Runner(object):
 
     def test_one_epoch(self, epoch, dataloader):
         self.model.eval()
+        Tools.print(f"[Epoch {epoch}] Evaluating with network: {self.model.__class__.__name__}")
         average_meter = AverageMeter(dataloader.dataset, device=self.device)
         for idx, batch in enumerate(dataloader):
             batch = MyCommon.to_cuda(batch, device=self.device)
-            with autocast():
+            with amp.autocast("cuda"):
                 logit = self.model(batch['query_img'], batch['support_imgs'].squeeze(1), batch['support_labels'].squeeze(1),
                                    query_mask=batch['query_mask'] if 'query_mask' in batch else None,
                                    support_masks=batch['support_masks'].squeeze(1) if 'support_masks' in batch else None)

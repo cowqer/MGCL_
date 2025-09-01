@@ -4,6 +4,7 @@ import torch.nn.functional as F
 
 from .net_tools_pro import myNetwork, SegmentationHead_baseline
 from .modules import FGE
+from .CD import SSCDModule, MCDModule
 
 class SegmentationHead_FGE(SegmentationHead_baseline):
     """
@@ -11,6 +12,67 @@ class SegmentationHead_FGE(SegmentationHead_baseline):
     """
     def __init__(self):
         super().__init__()
+        pass
+    
+    def forward(self, query_feats, support_feats, support_label, query_mask, support_masks):
+        
+        query_feats, support_feats = FGE(
+        query_feats, support_feats, support_label, query_mask, alpha=0.5
+        )
+        
+        # FBC
+        support_feats_fg = [self.label_feature(
+            support_feat, support_label.clone())for support_feat in support_feats]
+        support_feats_bg = [self.label_feature(
+            support_feat, (1 - support_label).clone())for support_feat in support_feats]
+        corr_fg = self.multilayer_correlation(query_feats, support_feats_fg)
+        corr_bg = self.multilayer_correlation(query_feats, support_feats_bg)
+        corr = [torch.concatenate([fg_one[:, None], bg_one[:, None]],
+                                  dim=1) for fg_one, bg_one in zip(corr_fg, corr_bg)]
+        # CD Correlation Decoder
+        logit = self.cd(corr[::-1])
+        return logit
+
+    pass
+
+class SegmentationHead_FGE_SSCD(SegmentationHead_baseline):
+    """
+    FGE + FBC + SSCD
+    """
+    def __init__(self):
+        super().__init__()
+        self.cd = SSCDModule([2, 2, 2])
+        pass
+    
+    def forward(self, query_feats, support_feats, support_label, query_mask, support_masks):
+        
+        query_feats, support_feats = FGE(
+        query_feats, support_feats, support_label, query_mask, alpha=0.5
+        )
+        
+        # FBC
+        support_feats_fg = [self.label_feature(
+            support_feat, support_label.clone())for support_feat in support_feats]
+        support_feats_bg = [self.label_feature(
+            support_feat, (1 - support_label).clone())for support_feat in support_feats]
+        corr_fg = self.multilayer_correlation(query_feats, support_feats_fg)
+        corr_bg = self.multilayer_correlation(query_feats, support_feats_bg)
+        corr = [torch.concatenate([fg_one[:, None], bg_one[:, None]],
+                                  dim=1) for fg_one, bg_one in zip(corr_fg, corr_bg)]
+        # CD Correlation Decoder
+        logit = self.cd(corr[::-1])
+        return logit
+
+    pass
+
+
+class SegmentationHead_FGE_MCD(SegmentationHead_baseline):
+    """
+    FGE + FBC + MCD
+    """
+    def __init__(self):
+        super().__init__()
+        self.cd = MCDModule([2, 2, 2])
         pass
     
     def forward(self, query_feats, support_feats, support_label, query_mask, support_masks):
@@ -43,3 +105,17 @@ class FGE_baseline_Network(myNetwork):
         super().__init__(args)
         self.segmentation_head = SegmentationHead_FGE()  # Reuse SegmentationHead for MGSANet
         pass
+    
+class FGE_SSCD_Network(myNetwork):
+    
+    def __init__(self, args):
+        super().__init__(args)
+        self.segmentation_head = SegmentationHead_FGE_SSCD()  # Reuse SegmentationHead for MGSANet
+        pass
+class FGE_MCD_Network(myNetwork):
+    
+    def __init__(self, args):
+        super().__init__(args)
+        self.segmentation_head = SegmentationHead_FGE_MCD()  # Reuse SegmentationHead for MGSANet
+        pass
+    pass

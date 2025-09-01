@@ -61,9 +61,13 @@ class Runner(object):
         weights = {one.replace("hpn_learner.", "mgcd."): weights[one] for one in weights.keys()}
         self.model.load_state_dict(weights)
 
+        # FSSDataset.initialize(img_size=args.img_size, datapath=args.datapath)
+        # self.dataloader_val = FSSDataset.build_dataloader(
+        #     args.benchmark, args.bsz, args.nworker, args.fold, 'val', args.shot,
+        #     use_mask=args.mask, mask_num=args.mask_num)
         FSSDataset.initialize(img_size=args.img_size, datapath=args.datapath)
         self.dataloader_val = FSSDataset.build_dataloader(
-            args.benchmark, args.bsz, args.nworker, args.fold, 'val', args.shot,
+            args.benchmark, 32, args.nworker, args.fold, 'val', args.shot,
             use_mask=args.mask, mask_num=args.mask_num)
         
     @torch.no_grad()

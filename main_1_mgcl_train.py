@@ -43,7 +43,7 @@ class Runner(object):
         self.device = MyCommon.gpu_setup(use_gpu=True, gpu_id=args.gpuid)
 
         # 动态选择网络
-        net_cls = globals()[self.args.net_name] if hasattr(self.args, "net_name") else MGCLNetwork
+        net_cls = globals()[self.args.net_name] if hasattr(self.args, "net_name") else myNetwork
         self.model = net_cls(args).to(self.device)
         self.optimizer = MyOptim.get_finetune_optimizer(args, self.model)
 
@@ -63,13 +63,18 @@ class Runner(object):
     def train(self):
         best_val_miou = 0
         for epoch in range(self.args.epoch_num):
-            Tools.print("begin epoch {} train".format(epoch))
+            now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            Tools.print(f"[{now_str}] begin epoch {epoch} train")
+
+            # Tools.print("begin epoch {} train".format(epoch))
 
             now_lr = MyOptim.adjust_learning_rate_poly(self.args, self.optimizer, epoch, self.args.epoch_num)
             Tools.print("lr={}".format(now_lr))
             train_loss, train_miou, train_fb_iou = self.train_one_epoch(epoch, self.dataloader_train)
 
-            Tools.print("begin epoch {} test".format(epoch))
+            # Tools.print("begin epoch {} test".format(epoch))
+            now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            Tools.print(f"[{now_str}] begin epoch {epoch} test")
             with torch.no_grad():
                 val_loss, val_miou, val_fb_iou = self.test_one_epoch(epoch, self.dataloader_val)
                 pass

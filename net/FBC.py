@@ -35,7 +35,6 @@ class SegmentationHead_w_o_sam(SegmentationHead):
             return logit
         
 
-        
 class SegmentationHead_w_omgfe(SegmentationHead):
     """
     SegmentationHead_FBC_MGCL is a subclass of SegmentationHead_FBC that implements the Multi-Granularity Attention Network.
@@ -48,7 +47,7 @@ class SegmentationHead_w_omgfe(SegmentationHead):
     
     def forward(self, query_feats, support_feats, support_label, query_mask, support_masks):
 
-            # FBC
+            # Foregroud Background Correlation (FBC)
             support_feats_fg = [self.label_feature(
                 support_feat, support_label.clone())for support_feat in support_feats]
             support_feats_bg = [self.label_feature(

@@ -322,11 +322,14 @@ class Logger:
         if not os.path.exists(cls.logpath):
             os.makedirs(cls.logpath)
 
-        logging.basicConfig(filemode='w',
-                            filename=os.path.join(cls.logpath, 'log.txt'),
-                            level=logging.INFO,
-                            format='%(message)s',
-                            datefmt='%m-%d %H:%M:%S')
+        logging.basicConfig(
+            filemode='w',
+            filename=os.path.join(cls.logpath, 'log.txt'),
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+
 
         # Console log config
         console = logging.StreamHandler()
