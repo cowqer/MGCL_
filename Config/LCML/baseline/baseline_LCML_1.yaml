@@ -8,7 +8,7 @@ backbone: resnet50
 finetune_backbone: true
 mask: true
 mask_num: 128
-datapath: /data/seekyou/Data/7class_LCML/Maping4DLRSD
+datapath: /data/seekyou/Data/lcml+data/I+L
 benchmark: lcma_plus
 lr: 0.001
 power: 0.9
