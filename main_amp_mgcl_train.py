@@ -38,7 +38,7 @@ class Runner(object):
         net_cls = globals()[self.args.net_name] if hasattr(self.args, "net_name") else myNetwork
         self.model = net_cls(args).to(self.device)
         self.optimizer = MyOptim.get_finetune_optimizer(args, self.model)
-
+        Logger.info("Model architecture:\n{}".format(self.model))
         FSSDataset.initialize(img_size=args.img_size, datapath=args.datapath)
         self.dataloader_train = FSSDataset.build_dataloader(
             args.benchmark, args.bsz, 8, args.fold, 'train', use_mask=args.mask, mask_num=args.mask_num)

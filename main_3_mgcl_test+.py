@@ -67,7 +67,7 @@ class Runner(object):
         #     use_mask=args.mask, mask_num=args.mask_num)
         FSSDataset.initialize(img_size=args.img_size, datapath=args.datapath)
         self.dataloader_val = FSSDataset.build_dataloader(
-            args.benchmark, 32, args.nworker, args.fold, 'val', args.shot,
+            args.benchmark, args.bsz, args.nworker, args.fold, 'val', args.shot,
             use_mask=args.mask, mask_num=args.mask_num)
         
     @torch.no_grad()
@@ -136,8 +136,8 @@ if __name__ == '__main__':
     Logger.initialize(args, training=False)
     runner = Runner(args=args)
     Logger.log_params(runner.model)
-    # Tools.print("Model Architcture:\n")
-    # Tools.print(str(runner.moedel))
+    Tools.print("Model Architcture:\n")
+    Tools.print(str(runner.model))
 
     # 调用 test_class（始终算 IoU），是否可视化由 --class 控制
     miou, fb_iou, iou, class_ids = runner.test_class(target_classes=args_cli.vis_classes)

@@ -674,11 +674,6 @@ class FSSDataset(object):
     def build_dataloader(cls, benchmark, bsz, nworker, fold, split, shot=1, use_mask=False, mask_num=128):
         shuffle = split == 'train'
         transform = cls.transform
-        # 根据数据集选择 transform
-        # if benchmark == 'lcml':
-        #     transform = cls.transform_lcml
-        # else:
-        #     transform = cls.transform
 
         dataset = cls.datasets[benchmark](cls.datapath, fold=fold, transform=transform, split=split,
                                           shot=shot, use_mask=use_mask, mask_num=mask_num)
