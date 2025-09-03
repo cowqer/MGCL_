@@ -13,15 +13,6 @@ from PIL import Image
 import os
 # from torchsummary import summary
 
-# 例如输入是 (3, 224, 224)，你要根据你的模型输入改
-
-palette = {
-    1: [166, 202, 240], 2: [128,128,0], 3: [0,0,128], 4: [255,0,0],
-    5: [0,128,0], 6: [128,0,0], 7: [255,233,233], 8: [160,160,164],
-    9: [0,128,128], 10: [90,87,255], 11: [255,255,0], 12: [255,192,0],
-    13: [0,0,255], 14: [255,0,192], 15: [128,0,128], 16: [0,255,0],
-    17: [0,255,255], 18: [255,215,0]
-}
 
 def load_yaml_config(yaml_path):
     with open(yaml_path, 'r') as f:
@@ -61,10 +52,6 @@ class Runner(object):
         weights = {one.replace("hpn_learner.", "mgcd."): weights[one] for one in weights.keys()}
         self.model.load_state_dict(weights)
 
-        # FSSDataset.initialize(img_size=args.img_size, datapath=args.datapath)
-        # self.dataloader_val = FSSDataset.build_dataloader(
-        #     args.benchmark, args.bsz, args.nworker, args.fold, 'val', args.shot,
-        #     use_mask=args.mask, mask_num=args.mask_num)
         FSSDataset.initialize(img_size=args.img_size, datapath=args.datapath)
         self.dataloader_val = FSSDataset.build_dataloader(
             args.benchmark, args.bsz, args.nworker, args.fold, 'val', args.shot,
@@ -102,7 +89,7 @@ class Runner(object):
 
             area_inter, area_union = Evaluator.classify_prediction(pred, batch)
             average_meter.update(area_inter, area_union, batch['class_id'], loss=None)
-            average_meter.write_process(idx, len(dataloader), 0, write_batch_idx=5)
+            average_meter.write_process(idx, len(dataloader), 0, write_batch_idx=10)
 
         miou, fb_iou, iou, class_ids = average_meter.compute_iou_class()
         return miou, fb_iou, iou, class_ids
@@ -136,12 +123,13 @@ if __name__ == '__main__':
     Logger.initialize(args, training=False)
     runner = Runner(args=args)
     Logger.log_params(runner.model)
-    Tools.print("Model Architcture:\n")
-    Tools.print(str(runner.model))
+    # Tools.print("Model Architcture:\n")
+    # Tools.print(str(runner.model))
 
     # 调用 test_class（始终算 IoU），是否可视化由 --class 控制
     miou, fb_iou, iou, class_ids = runner.test_class(target_classes=args_cli.vis_classes)
 
+    # 输出整体指标
     # 输出整体指标
     print("mIoU (mean):", miou.item() if torch.is_tensor(miou) else miou)
     print("FB-IoU:", fb_iou.item() if torch.is_tensor(fb_iou) else fb_iou)
@@ -149,9 +137,27 @@ if __name__ == '__main__':
     # 输出每类指标
     Tools.print("Per-class IoU:")
     id2name = runner.dataloader_val.dataset.id2name
+    results = {
+        "mIoU": miou.item() if torch.is_tensor(miou) else miou,
+        "FB-IoU": fb_iou.item() if torch.is_tensor(fb_iou) else fb_iou,
+        "per_class": {}
+    }
     for class_id, class_iou in zip(class_ids.tolist(), iou):
         class_name = id2name.get(class_id, f"Class_{class_id}")
+        results["per_class"][f"{class_name}_id{class_id}"] = class_iou.item()
+
         print(f"{class_name} (id {class_id}): {class_iou.item():.4f}")
+
+    # === 保存结果 ===
+    import json, os
+    save_dir = os.path.dirname(args.load)   # pt 文件所在目录
+    save_name = os.path.splitext(os.path.basename(args.load))[0] + "_eval.json"
+    save_path = os.path.join(save_dir, save_name)
+    with open(save_path, "w") as f:
+        json.dump(results, f, indent=4)
+
+    Tools.print(f"📂 结果已保存到 {save_path}")
+
 
     # 日志整理
     try:

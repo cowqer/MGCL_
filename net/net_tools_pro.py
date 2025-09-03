@@ -134,6 +134,7 @@ class CDModule(nn.Module):
         self.decoder1_my = nn.Sequential(
             nn.Conv2d(64, 32, (3, 3), padding=(1, 1), bias=True), nn.ReLU(),
             nn.Conv2d(32, 32, (3, 3), padding=(1, 1), bias=True), nn.ReLU())
+        
         self.decoder2 = nn.Sequential(
             nn.Conv2d(outch2, outch1, (3, 3), padding=(1, 1), bias=True), nn.ReLU(),
             nn.Conv2d(outch1, 2, (3, 3), padding=(1, 1), bias=True))
@@ -199,6 +200,7 @@ class myNetwork(nn.Module):
             self.extract_feats = self.extract_feats_vgg
         elif "50" in self.backbone_type:
             self.backbone = resnet.resnet50(pretrained=True)
+            # self.backbone.conv1.in_channels = 4
             self.extract_feats = self.extract_feats_res
         else:
             self.backbone = resnet.resnet101(pretrained=True)

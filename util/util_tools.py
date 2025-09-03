@@ -369,6 +369,7 @@ class Logger:
                 backbone_param += n_param
             else:
                 learner_param += n_param
+        
         Logger.info('Backbone # param.: %d' % backbone_param)
         Logger.info('Learnable # param.: %d' % learner_param)
         Logger.info('Total # param.: %d' % (backbone_param + learner_param))

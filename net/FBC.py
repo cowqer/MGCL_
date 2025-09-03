@@ -4,7 +4,7 @@ import torch.nn.functional as F
 
 from .modules import *
 from .net_tools import SegmentationHead, MGCDModule, MGFEModule, MGCLNetwork
-from .net_tools_pro import  CDModule, myNetwork
+from .net_tools_pro import CDModule , myNetwork
 
 
 class SegmentationHead_w_o_sam(SegmentationHead):
