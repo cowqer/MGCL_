@@ -2,6 +2,21 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+class GatedFusion(nn.Module):
+    def __init__(self, in_channels):
+        super(GatedFusion, self).__init__()
+        # 输入是 mask 和 sobel 特征拼接后的 2C
+        self.gate_conv = nn.Conv2d(in_channels * 2, in_channels, kernel_size=1)
+        self.norm = nn.BatchNorm2d(in_channels)
+
+    def forward(self, feat_mask, feat_sobel):
+        # 拼接两个分支
+        fusion = torch.cat([feat_mask, feat_sobel], dim=1)   # [B, 2C, H, W]
+        gate = torch.sigmoid(self.norm(self.gate_conv(fusion)))  # [B, C, H, W]
+
+        # 门控融合
+        fused = gate * feat_mask + (1 - gate) * feat_sobel   # [B, C, H, W]
+        return fused
 class MaskSobelFusion(nn.Module):
     def __init__(self, init_alpha=1.0, init_beta=0.5):
         super().__init__()

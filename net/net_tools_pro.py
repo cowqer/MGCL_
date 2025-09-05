@@ -169,7 +169,7 @@ class CDModule(nn.Module):
 
         bsz, ch, ha, wa, hb, wb = hypercorr_mix432.size()
         hypercorr_encoded = hypercorr_mix432.view(bsz, ch, ha, wa, -1).mean(dim=-1)
-
+        print("query_mask",query_mask)
         if query_mask is not None:
             hypercorr_encoded = torch.concat([hypercorr_encoded, hypercorr_encoded], dim=1)
         else:

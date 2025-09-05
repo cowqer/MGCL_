@@ -6,6 +6,34 @@ from .modules import *
 from .net_tools import SegmentationHead, MGCDModule, MGFEModule, MGCLNetwork
 from .net_tools_pro import CDModule , myNetwork
 
+class SegmentationHead_mgcd_fge(SegmentationHead):
+    """
+    SegmentationHead_FBC_MGCL is a subclass of SegmentationHead_FBC that implements the Multi-Granularity Attention Network.
+    It uses the same backbone and segmentation head but focuses on multi-granularity attention mechanisms.
+    """
+    def __init__(self):
+        super().__init__()
+        self.mgcd = MGCDModule([2, 2, 2])  # Initialize MGCDModule with specific parameters
+        pass
+    
+    def forward(self, query_feats, support_feats, support_label, query_mask, support_masks):
+        
+            query_feats, support_feats = FGE(query_feats, support_feats, support_label, query_mask, alpha=0.5)
+        
+            # FBC
+            support_feats_fg = [self.label_feature(
+                support_feat, support_label.clone())for support_feat in support_feats]
+            support_feats_bg = [self.label_feature(
+                support_feat, (1 - support_label).clone())for support_feat in support_feats]
+            
+            corr_fg = self.multilayer_correlation(query_feats, support_feats_fg)
+            corr_bg = self.multilayer_correlation(query_feats, support_feats_bg)
+            corr = [torch.concatenate([fg_one[:, None], bg_one[:, None]],
+                                    dim=1) for fg_one, bg_one in zip(corr_fg, corr_bg)]
+
+            # MGCD
+            logit = self.mgcd(corr[::-1], query_mask)
+            return logit
 
 class SegmentationHead_w_o_sam(SegmentationHead):
     """
@@ -128,7 +156,7 @@ class SegmentationHead_FBC_3_1(SegmentationHead):
 #把mgcd变为cd
     def __init__(self):
         super().__init__()
-        self.cd = CDModule([2, 2, 2])
+        self.cd = MGCDModule([2, 2, 2])
 
         pass
 
@@ -276,4 +304,11 @@ class nosam_Network(MGCLNetwork):
     def __init__(self, args):
         super().__init__(args)
         self.segmentation_head = SegmentationHead_w_o_sam()  # Reuse SegmentationHead for MGSANet
+        pass
+    
+class mgcd_fge_Network(MGCLNetwork):
+    
+    def __init__(self, args):
+        super().__init__(args)
+        self.segmentation_head = SegmentationHead_mgcd_fge()  # Reuse SegmentationHead for MGSANet
         pass

@@ -106,7 +106,7 @@ class MGCDModule(nn.Module):
 
         bsz, ch, ha, wa, hb, wb = hypercorr_mix432.size()
         hypercorr_encoded = hypercorr_mix432.view(bsz, ch, ha, wa, -1).mean(dim=-1)
-
+        # print("query_mask111",query_mask)
         if query_mask is not None:
             # MGFE
             _hypercorr_encoded = MGFEModule.update_feature_one(hypercorr_encoded, query_mask)

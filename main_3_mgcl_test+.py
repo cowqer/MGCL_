@@ -56,6 +56,7 @@ class Runner(object):
         self.dataloader_val = FSSDataset.build_dataloader(
             args.benchmark, args.bsz, args.nworker, args.fold, 'val', args.shot,
             use_mask=args.mask, mask_num=args.mask_num)
+        Logger.log_params(self.model)
         
     @torch.no_grad()
     def test(self):

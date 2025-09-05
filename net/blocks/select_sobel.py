@@ -87,6 +87,7 @@ class SSblock(nn.Module):
         
         self.conv1 = nn.Conv2d(dim, dim//2, 1)
         self.conv2 = nn.Conv2d(dim, dim//2, 1)
+        
         self.conv_squeeze = nn.Conv2d(2, 2, 7, padding=3)
         self.conv = nn.Conv2d(dim//2, dim, 1)
 
@@ -94,8 +95,6 @@ class SSblock(nn.Module):
         attn1 = self.sobel1(x)
         attn2 = self.sobel2(attn1)
         # attn1 = self.conv0(x)
-        # attn2 = self.conv_spatial(attn1)
-        print(attn1.shape, attn2.shape)
         attn1 = self.conv1(attn1)
         attn2 = self.conv2(attn2)
         
