@@ -46,6 +46,8 @@ class Runner(object):
             args.benchmark, args.bsz, 8, args.fold, 'val', use_mask=args.mask, mask_num=args.mask_num)
         os.makedirs(args.loggerpath, exist_ok=True)
         shutil.copy(os.path.join("net", "FBC.py"), os.path.join(args.loggerpath, "FBC.py"))
+        shutil.copy(os.path.join("net", "CD.py"), os.path.join(args.loggerpath, "CD.py"))
+        shutil.copy(os.path.join("net", "baseline_.py"), os.path.join(args.loggerpath, "baseline_.py"))
         Logger.log_params(self.model)
 
         # 初始化 GradScaler

@@ -152,17 +152,23 @@ class SegmentationHead_FBC_3(SegmentationHead):
             logit = self.mgcd(corr[::-1], query_mask)
             return logit
 
-class SegmentationHead_FBC_3_1(SegmentationHead):
-#把mgcd变为cd
+class SegmentationHead_FBC_3_v1(SegmentationHead):
+
     def __init__(self):
         super().__init__()
-        self.cd = MGCDModule([2, 2, 2])
+        self.mgcd = MGCDModule([2, 2, 2])
 
+        self.alpha = nn.Parameter(torch.tensor(0.0))# 初始为 0，经sigmoid后为0.5
+        # self.beta = nn.Parameter(torch.tensor(0.0))
         pass
 
     def forward(self, query_feats, support_feats, support_label, query_mask, support_masks):
             # MGFE 
-
+            # _query_feats, _support_feats = MGFEModule.update_feature(query_feats, support_feats, query_mask, support_masks)
+            
+            # query_feats = [torch.concat([one, two], dim=1) for one, two in zip(query_feats, _query_feats)]
+            # support_feats = [torch.concat([one, two], dim=1) for one, two in zip(support_feats, _support_feats)]
+            
             label = support_label.unsqueeze(1)  # [B,1,H0,W0]
 
             feat = support_feats[2]  # shape: [16, 2048, 8, 8]
@@ -176,7 +182,7 @@ class SegmentationHead_FBC_3_1(SegmentationHead):
             query_feat_2 = query_feats[2]  # 取最后一层特征
             support_feat_2 = support_feats[2]  # 取最后一层特征
             
-            alpha = 0.5
+            alpha = torch.sigmoid(self.alpha)   # 初始值 0.5
             beta = 1.0 - alpha
 
             prior_fg, prior_bg = compute_query_prior(query_feat_2, support_prototypes_fg, support_prototypes_bg, temperature=1.1)
@@ -226,7 +232,7 @@ class MG_FBC_3_1Network(MGCLNetwork):
     """
     def __init__(self, args):
         super().__init__(args)
-        self.segmentation_head = SegmentationHead_FBC_3_1()  # Reuse SegmentationHead for MGSANet
+        self.segmentation_head = SegmentationHead_FBC_3_v1()  # Reuse SegmentationHead for MGSANet
         pass
     
 class Test_Network(MGCLNetwork):
