@@ -1,0 +1,23 @@
+# filepath: /data/seekyou/Algos/MGCL/config.yaml
+logpath: demo
+gpuid: 0
+bsz: 16
+epoch_num: 100
+fold: 2
+backbone: resnet50
+finetune_backbone: true
+mask: true
+mask_num: 128
+datapath: /data/seekyou/Data/lcml+data/I+L
+benchmark: lcma_plus
+lr: 0.001
+power: 0.9
+niter: 100
+max_steps: 200000
+nworker: 8
+img_size: 256
+use_original_imgsize: false
+net_name: mgcd_fbc_Network
+is_sgd: False
+use_gpu: true
+shot: 1

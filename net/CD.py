@@ -204,7 +204,7 @@ class SSCDModule_v1(nn.Module):
             nn.Conv2d(outch2, outch1, (3, 3), padding=(1, 1), bias=True), nn.ReLU(),
             nn.Conv2d(outch1, 2, (3, 3), padding=(1, 1), bias=True))
 
-        self.SSblock = SSblock(dim=128)
+        self.SSblock = SSblock(dim=64)
         
         pass
     
@@ -233,7 +233,7 @@ class SSCDModule_v1(nn.Module):
 
         bsz, ch, ha, wa, hb, wb = hypercorr_mix432.size()
         hypercorr_encoded = hypercorr_mix432.view(bsz, ch, ha, wa, -1).mean(dim=-1)
-        print("query_mask",query_mask)
+        # print("query_mask",query_mask)
         
         if query_mask is not None:
             _hypercorr_encoded = MGFEModule.update_feature_one(hypercorr_encoded, query_mask)
@@ -244,7 +244,7 @@ class SSCDModule_v1(nn.Module):
             hypercorr_encoded = torch.concat([hypercorr_encoded, hypercorr_encoded], dim=1)
             pass
         #! SSblock
-        hypercorr_encoded = self.SSblock(hypercorr_encoded) 
+        # hypercorr_encoded = self.SSblock(hypercorr_encoded) 
 
         hypercorr_decoded = self.decoder1(hypercorr_encoded)
         upsample_size = (hypercorr_decoded.size(-1) * 2,) * 2
