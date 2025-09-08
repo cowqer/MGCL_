@@ -17,7 +17,7 @@ max_steps: 200000
 nworker: 8
 img_size: 256
 use_original_imgsize: false
-net_name: MG_FBC_3_v2Network
+net_name: MGCD_v1Network
 is_sgd: False
 use_gpu: true
 shot: 1

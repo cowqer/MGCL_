@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .CD import SSCDModule_v1
+from .CD import SSCDModule_v1, MGCDModule_v3, MGCDModule_v2, MGCDModule_v1
 from .modules import *
 from .net_tools import SegmentationHead, MGCDModule, MGFEModule, MGCLNetwork
 from .net_tools_pro import CDModule , myNetwork
@@ -249,11 +249,6 @@ class SegmentationHead_FBC_3_v2(SegmentationHead):
         pass
 
     def forward(self, query_feats, support_feats, support_label, query_mask, support_masks):
-            # MGFE 
-            # _query_feats, _support_feats = MGFEModule.update_feature(query_feats, support_feats, query_mask, support_masks)
-            
-            # query_feats = [torch.concat([one, two], dim=1) for one, two in zip(query_feats, _query_feats)]
-            # support_feats = [torch.concat([one, two], dim=1) for one, two in zip(support_feats, _support_feats)]
             
             label = support_label.unsqueeze(1)  # [B,1,H0,W0]
 
@@ -299,6 +294,174 @@ class SegmentationHead_FBC_3_v2(SegmentationHead):
             logit = self.mgcd(corr[::-1], query_mask)
             return logit
 
+class SegmentationHead_FBC_3_MGCD_v1(SegmentationHead):
+
+    def __init__(self):
+        super().__init__()
+        self.mgcd = MGCDModule_v1([2, 2, 2])
+        # self.alpha = nn.Parameter(torch.tensor(0.0))  # 初始为 0，经sigmoid后为0.5
+        # self.beta = nn.Parameter(torch.tensor(0.0))
+        pass
+
+    def forward(self, query_feats, support_feats, support_label, query_mask, support_masks):
+            
+            label = support_label.unsqueeze(1)  # [B,1,H0,W0]
+
+            feat = support_feats[2]  # shape: [16, 2048, 8, 8]
+            
+            proto_fg = masked_avg_pool(feat, label)            # 前景 prototype: [16, 2048]
+            proto_bg = masked_avg_pool(feat, 1 - label)        # 背景 prototype: [16, 2048]
+
+            support_prototypes_fg = proto_fg
+            support_prototypes_bg = proto_bg
+
+            query_feat_2 = query_feats[2]  # 取最后一层特征
+            support_feat_2 = support_feats[2]  # 取最后一层特征
+            
+            alpha = 0.5
+            beta = 1.0 - alpha
+
+            prior_fg, prior_bg = compute_query_prior(query_feat_2, support_prototypes_fg, support_prototypes_bg, temperature=1.1)
+            prior = torch.sigmoid(prior_fg - prior_bg)
+            
+            query_prototypes_fg = get_query_foreground_prototype(query_feat_2, prior)  # [B, C]
+            prototype_fg = alpha * query_prototypes_fg + beta * support_prototypes_fg
+
+            prototype_fg = prototype_fg.unsqueeze(-1).unsqueeze(-1)   # [16, 4096, 1, 1]
+            prototype_fg = prototype_fg.expand(-1, -1, 8, 8)    
+            
+            support_feats[2]= support_feats[2] + prototype_fg
+            query_feats[2] = query_feats[2] + prototype_fg
+            # print("query_feats", [f.shape for f in query_feats])  # Debugging line to check shapes
+            
+            # FBC
+            support_feats_fg = [self.label_feature(
+                support_feat, support_label.clone())for support_feat in support_feats]
+            support_feats_bg = [self.label_feature(
+                support_feat, (1 - support_label).clone())for support_feat in support_feats]
+            
+            corr_fg = self.multilayer_correlation(query_feats, support_feats_fg)
+            corr_bg = self.multilayer_correlation(query_feats, support_feats_bg)
+            corr = [torch.concatenate([fg_one[:, None], bg_one[:, None]],
+                                    dim=1) for fg_one, bg_one in zip(corr_fg, corr_bg)]
+
+            # MGCD
+            logit = self.mgcd(corr[::-1], query_mask)
+            
+            return logit
+
+class SegmentationHead_FBC_3_MGCD_v2(SegmentationHead):
+
+    def __init__(self):
+        super().__init__()
+        self.mgcd = MGCDModule_v2([2, 2, 2])
+        # self.alpha = nn.Parameter(torch.tensor(0.0))  # 初始为 0，经sigmoid后为0.5
+        # self.beta = nn.Parameter(torch.tensor(0.0))
+        pass
+
+    def forward(self, query_feats, support_feats, support_label, query_mask, support_masks):
+            
+            label = support_label.unsqueeze(1)  # [B,1,H0,W0]
+
+            feat = support_feats[2]  # shape: [16, 2048, 8, 8]
+            
+            proto_fg = masked_avg_pool(feat, label)            # 前景 prototype: [16, 2048]
+            proto_bg = masked_avg_pool(feat, 1 - label)        # 背景 prototype: [16, 2048]
+
+            support_prototypes_fg = proto_fg
+            support_prototypes_bg = proto_bg
+
+            query_feat_2 = query_feats[2]  # 取最后一层特征
+            support_feat_2 = support_feats[2]  # 取最后一层特征
+            
+            alpha = 0.5
+            beta = 1.0 - alpha
+
+            prior_fg, prior_bg = compute_query_prior(query_feat_2, support_prototypes_fg, support_prototypes_bg, temperature=1.1)
+            prior = torch.sigmoid(prior_fg - prior_bg)
+            
+            query_prototypes_fg = get_query_foreground_prototype(query_feat_2, prior)  # [B, C]
+            prototype_fg = alpha * query_prototypes_fg + beta * support_prototypes_fg
+
+            prototype_fg = prototype_fg.unsqueeze(-1).unsqueeze(-1)   # [16, 4096, 1, 1]
+            prototype_fg = prototype_fg.expand(-1, -1, 8, 8)    
+            
+            support_feats[2]= support_feats[2] + prototype_fg
+            query_feats[2] = query_feats[2] + prototype_fg
+            # print("query_feats", [f.shape for f in query_feats])  # Debugging line to check shapes
+            
+            # FBC
+            support_feats_fg = [self.label_feature(
+                support_feat, support_label.clone())for support_feat in support_feats]
+            support_feats_bg = [self.label_feature(
+                support_feat, (1 - support_label).clone())for support_feat in support_feats]
+            
+            corr_fg = self.multilayer_correlation(query_feats, support_feats_fg)
+            corr_bg = self.multilayer_correlation(query_feats, support_feats_bg)
+            corr = [torch.concatenate([fg_one[:, None], bg_one[:, None]],
+                                    dim=1) for fg_one, bg_one in zip(corr_fg, corr_bg)]
+
+            # MGCD
+            logit = self.mgcd(corr[::-1], query_mask)
+            
+            return logit
+
+class SegmentationHead_FBC_3_MGCD_v3(SegmentationHead):
+
+    def __init__(self):
+        super().__init__()
+        self.mgcd = MGCDModule_v3([2, 2, 2])
+        # self.alpha = nn.Parameter(torch.tensor(0.0))  # 初始为 0，经sigmoid后为0.5
+        # self.beta = nn.Parameter(torch.tensor(0.0))
+        pass
+
+    def forward(self, query_feats, support_feats, support_label, query_mask, support_masks):
+            
+            label = support_label.unsqueeze(1)  # [B,1,H0,W0]
+
+            feat = support_feats[2]  # shape: [16, 2048, 8, 8]
+            
+            proto_fg = masked_avg_pool(feat, label)            # 前景 prototype: [16, 2048]
+            proto_bg = masked_avg_pool(feat, 1 - label)        # 背景 prototype: [16, 2048]
+
+            support_prototypes_fg = proto_fg
+            support_prototypes_bg = proto_bg
+
+            query_feat_2 = query_feats[2]  # 取最后一层特征
+            support_feat_2 = support_feats[2]  # 取最后一层特征
+            
+            alpha = 0.5
+            beta = 1.0 - alpha
+
+            prior_fg, prior_bg = compute_query_prior(query_feat_2, support_prototypes_fg, support_prototypes_bg, temperature=1.1)
+            prior = torch.sigmoid(prior_fg - prior_bg)
+            
+            query_prototypes_fg = get_query_foreground_prototype(query_feat_2, prior)  # [B, C]
+            prototype_fg = alpha * query_prototypes_fg + beta * support_prototypes_fg
+
+            prototype_fg = prototype_fg.unsqueeze(-1).unsqueeze(-1)   # [16, 4096, 1, 1]
+            prototype_fg = prototype_fg.expand(-1, -1, 8, 8)    
+            
+            support_feats[2]= support_feats[2] + prototype_fg
+            query_feats[2] = query_feats[2] + prototype_fg
+            # print("query_feats", [f.shape for f in query_feats])  # Debugging line to check shapes
+            
+            # FBC
+            support_feats_fg = [self.label_feature(
+                support_feat, support_label.clone())for support_feat in support_feats]
+            support_feats_bg = [self.label_feature(
+                support_feat, (1 - support_label).clone())for support_feat in support_feats]
+            
+            corr_fg = self.multilayer_correlation(query_feats, support_feats_fg)
+            corr_bg = self.multilayer_correlation(query_feats, support_feats_bg)
+            corr = [torch.concatenate([fg_one[:, None], bg_one[:, None]],
+                                    dim=1) for fg_one, bg_one in zip(corr_fg, corr_bg)]
+
+            # MGCD
+            logit = self.mgcd(corr[::-1], query_mask)
+            
+            return logit
+
 ###############从8.3之后开始的FBC网络，重新命名，按照数字顺序#####################
 
 class MG_FBC_3Network(MGCLNetwork):
@@ -329,6 +492,29 @@ class MG_FBC_3_v2Network(MGCLNetwork):
         self.segmentation_head = SegmentationHead_FBC_3_v2()  # Reuse SegmentationHead for MGSANet
         pass
 
+class MGCD_v1Network(MGCLNetwork):
+    """
+    """
+    def __init__(self, args):
+        super().__init__(args)
+        self.segmentation_head = SegmentationHead_FBC_3_MGCD_v1()  # Reuse SegmentationHead for MGSANet
+        pass
+
+class MGCD_v2Network(MGCLNetwork):
+    """
+    """
+    def __init__(self, args):
+        super().__init__(args)
+        self.segmentation_head = SegmentationHead_FBC_3_MGCD_v2()  # Reuse SegmentationHead for MGSANet
+        pass
+    
+class MGCD_v3Network(MGCLNetwork):
+    """
+    """
+    def __init__(self, args):
+        super().__init__(args)
+        self.segmentation_head = SegmentationHead_FBC_3_MGCD_v3()  # Reuse SegmentationHead for MGSANet
+        pass
     
 class Test_Network(MGCLNetwork):
     """
@@ -420,3 +606,4 @@ class mgcd_fbc_Network(MGCLNetwork):
         super().__init__(args)
         self.segmentation_head = SegmentationHead_mgcd_fbc()  # Reuse SegmentationHead for MGSANet
         pass
+    

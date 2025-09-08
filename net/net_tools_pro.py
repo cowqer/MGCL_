@@ -1,12 +1,393 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .modules import CenterPivotConv4d
-
+from .modules import CenterPivotConv4d,SSblock
+import math
 from torchvision.models import resnet
 from torchvision.models import vgg
 
+import torch
+import torch.nn.functional as F
 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class MGFEModule_v1(object):
+    """Mask Guided Feature Enhancement + 可选择 Mask"""
+
+    @classmethod
+    def update_feature_one(cls, query_feat, query_mask, mask_score=None):
+        '''单特征增强'''
+        return cls.enabled_feature([query_feat], query_mask, mask_score)[0]
+
+    @classmethod
+    def update_feature(cls, query_feats, support_feats, query_mask, support_masks, 
+                       query_mask_score=None, support_mask_score=None):
+        '''批量特征增强'''
+        query_feats = cls.enabled_feature(query_feats, query_mask, query_mask_score)
+        support_feats = cls.enabled_feature(support_feats, support_masks, support_mask_score)
+        return query_feats, support_feats
+
+    @classmethod
+    def enabled_feature(cls, feats, masks, mask_score=None, threshold=0.2):
+        """
+        feats: list of [B,C,H,W]
+        masks: [B,M,H,W] 二值 mask
+        mask_score: [B,M] 每个 mask 的置信/重要性分数，可选
+        threshold: 选择阈值，小于阈值 mask 被抑制
+        """
+        b, m, h, w = masks.shape
+        # 每个像素只属于一个区域
+        index_mask = torch.full_like(masks[:, 0], m, dtype=torch.long)
+        for i in range(m):
+            index_mask[masks[:, i] == 1] = i
+        masks_onehot = F.one_hot(index_mask, num_classes=m+1)[..., :m].permute(0,3,1,2).contiguous().float()
+
+        # mask 选择：根据 mask_score 或均匀 threshold
+        if mask_score is not None:
+            score_mask = (mask_score > threshold).float().view(b, m, 1, 1)
+            masks_onehot = masks_onehot * score_mask
+        else:
+            # 按 mask 覆盖比例过滤：mask 占比 < threshold 则抑制
+            mask_area = masks_onehot.view(b, m, -1).sum(-1) / (h*w)  # [B,M]
+            score_mask = (mask_area > threshold).float().view(b, m, 1, 1)
+            masks_onehot = masks_onehot * score_mask
+
+        enabled_feats = []
+        for feat in feats:
+            b, c, h_feat, w_feat = feat.shape
+            target_masks = F.interpolate(masks_onehot, (h_feat, w_feat), mode='nearest')
+            
+            # 区域平均特征
+            map_features = cls.my_masked_average_pooling(feat, target_masks)
+
+            # 投影回像素
+            _map_features = map_features.permute(0,2,1).contiguous()  # [B,C,M]
+            feature_sum = torch.bmm(_map_features, target_masks.view(b, m, -1))
+            feature_sum = feature_sum.view(b, c, h_feat, w_feat)
+
+            sum_mask = target_masks.sum(dim=1, keepdim=True)
+            enabled_feat = feature_sum / (sum_mask + 1e-8)
+            enabled_feats.append(enabled_feat)
+        
+        return enabled_feats
+
+    @staticmethod
+    def my_masked_average_pooling(feature, mask):
+        b, c, h, w = feature.shape
+        _, m, _, _ = mask.shape
+        _mask = mask.view(b, m, -1)
+        _feature = feature.view(b, c, -1).permute(0, 2, 1).contiguous()
+        feature_sum = torch.bmm(_mask, _feature)
+        masked_sum = _mask.sum(dim=2, keepdim=True)
+        return feature_sum / (masked_sum + 1e-8)
+
+
+class SobelConv(nn.Module):
+    """通用 Sobel 卷积"""
+    def __init__(self, in_channels, kernel_size=3):
+        super().__init__()
+        assert kernel_size in [3,5]
+        if kernel_size==3:
+            sobel_x = torch.tensor([[-1.,0.,1.],[-2.,0.,2.],[-1.,0.,1.]])
+        else:
+            sobel_x = torch.tensor([[-5,-4,0,4,5],
+                                    [-8,-10,0,10,8],
+                                    [-10,-20,0,20,10],
+                                    [-8,-10,0,10,8],
+                                    [-5,-4,0,4,5]])
+        sobel_y = sobel_x.T
+        kernel = torch.stack([sobel_x,sobel_y]).unsqueeze(1).repeat(in_channels,1,1,1)
+        self.conv = nn.Conv2d(in_channels, 2*in_channels, kernel_size=kernel_size, 
+                              stride=1, padding=kernel_size//2, bias=False, groups=in_channels)
+        self.conv.weight.data = kernel
+        self.conv.weight.requires_grad = False
+    def forward(self,x):
+        return self.conv(x)
+
+class SSblock(nn.Module):
+    """Sobel + Attention 模块"""
+    def __init__(self, dim):
+        super().__init__()
+        self.sobel3 = SobelConv(dim,3)
+        self.sobel5 = SobelConv(dim,5)
+        self.conv3 = nn.Conv2d(2*dim, dim//2,1)
+        self.conv5 = nn.Conv2d(2*dim, dim//2,1)
+        self.conv_squeeze = nn.Conv2d(2,2,7,padding=3)
+        self.conv_fuse = nn.Conv2d(dim//2, dim,1)
+    def forward(self,x):
+        feat3 = self.conv3(self.sobel3(x))
+        feat5 = self.conv5(self.sobel5(x))
+        attn_cat = torch.cat([feat3,feat5],dim=1)
+        avg_attn = torch.mean(attn_cat,dim=1,keepdim=True)
+        max_attn,_ = torch.max(attn_cat,dim=1,keepdim=True)
+        agg = torch.cat([avg_attn,max_attn],dim=1)
+        sig = self.conv_squeeze(agg).sigmoid()
+        fused = feat3*sig[:,0:1,:,:] + feat5*sig[:,1:2,:,:]
+        fused = self.conv_fuse(fused)
+        return fused  # 注意：这里只输出增强特征，不做残差
+
+class MGFEModule_v2(object):
+    """Mask Guided Feature Enhancement + Sobel Attention"""
+    SSblock_module = None  # 可在外部初始化一次，复用
+    @classmethod
+    def update_feature_one(cls, query_feat, query_mask):
+        return cls.enabled_feature([query_feat], query_mask)[0]
+
+    @classmethod
+    def update_feature(cls, query_feats, support_feats, query_mask, support_masks):
+        query_feats = cls.enabled_feature(query_feats, query_mask)
+        support_feats = cls.enabled_feature(support_feats, support_masks)
+        return query_feats, support_feats
+    @classmethod
+    def set_sobel_block(cls, dim):
+        cls.SSblock_module = SSblock(dim).cuda() if torch.cuda.is_available() else SSblock(dim)
+
+    @classmethod
+    def enabled_feature(cls, feats, masks):
+        b, m, h_mask, w_mask = masks.shape
+        index_mask = torch.argmax(masks, dim=1)
+        masks_onehot = F.one_hot(index_mask, num_classes=m)[..., :m].permute(0,3,1,2).contiguous() # [B,M,Hm,Wm]
+
+        enabled_feats = []
+        for feat in feats:
+            b, c, h_feat, w_feat = feat.shape
+            target_masks = F.interpolate(masks_onehot.float(), (h_feat,w_feat), mode='nearest')
+            # 区域平均特征
+            map_features = cls.my_masked_average_pooling(feat,target_masks)
+            # 投影回像素
+            _map_features = map_features.permute(0,2,1).contiguous()  # [B,C,M]
+            feature_sum = torch.bmm(_map_features, target_masks.view(b,m,-1)).view(b,c,h_feat,w_feat)
+            sum_mask = target_masks.sum(dim=1,keepdim=True)
+            mask_feat = feature_sum / (sum_mask+1e-8)
+
+            # ---- Sobel Attention branch ----
+            if cls.SSblock_module is not None:
+                sobel_feat = cls.SSblock_module(feat)
+                # 插值到和 mask_feat 一致
+                if sobel_feat.shape[2:] != mask_feat.shape[2:]:
+                    sobel_feat = F.interpolate(sobel_feat, mask_feat.shape[2:], mode='bilinear', align_corners=False)
+                # 融合
+                alpha = 0.3  # Sobel 权重，可调/可学习
+                mask_feat = mask_feat + alpha * sobel_feat
+
+            enabled_feats.append(mask_feat)
+        return enabled_feats
+
+    @staticmethod
+    def my_masked_average_pooling(feature, mask):
+        b,c,h,w = feature.shape
+        _,m,_,_ = mask.shape
+        _mask = mask.view(b,m,-1)
+        _feature = feature.view(b,c,-1).permute(0,2,1).contiguous()
+        feature_sum = torch.bmm(_mask,_feature)
+        masked_sum = _mask.sum(dim=2,keepdim=True)
+        return feature_sum/(masked_sum+1e-8)
+
+class MGFEModule_v3(object):
+    """
+    Enhanced Mask-Guided Feature Enrichment (v3)
+
+    Key ideas:
+    - Keep masked-average pooling prototype extraction (backward compatible)
+    - Multi-scale aggregation across feat levels
+    - Prototype <-> pixel cross-attention (lightweight Transformer-like)
+    - Channel attention (Squeeze-and-Excite) and spatial gating derived from prototypes
+    - Residual connection + learnable gates initialized to zero (to avoid hurting baseline)
+    - All ops are batch-friendly and support list of feature maps (multi-level)
+    """
+
+    @classmethod
+    def update_feature_one(cls, query_feat, query_mask, **kwargs):
+        return cls.enabled_feature([query_feat], query_mask, **kwargs)[0]
+
+    @classmethod
+    def update_feature(cls, query_feats, support_feats, query_mask, support_masks, **kwargs):
+        q = cls.enabled_feature(query_feats, query_mask, **kwargs)
+        s = cls.enabled_feature(support_feats, support_masks, **kwargs)
+        return q, s
+
+    @classmethod
+    def enabled_feature(cls, feats, masks, 
+                        prototype_dim=None,
+                        use_cross_attn=True,
+                        n_attn_heads=4,
+                        attn_hidden=128,
+                        use_channel_attn=True,
+                        multi_scale_pool=True,
+                        gate_learnable=True):
+        """
+        feats: list of tensors [B, C, H, W]
+        masks: [B, M, Hm, Wm]  (binary masks per region)
+        Returns: list of enhanced features (same shapes as feats)
+        """
+
+        device = feats[0].device
+        b, m, h_mask, w_mask = masks.shape
+
+        # --- step0: compute one-hot region assignment as in original ---
+        index_mask = torch.full_like(masks[:, 0], m, dtype=torch.long, device=device)
+        for i in range(m):
+            index_mask = torch.where(masks[:, i] == 1, torch.full_like(index_mask, i), index_mask)
+        masks_onehot = F.one_hot(index_mask, num_classes=m+1)[..., :m]   # [B, Hm, Wm, M]
+        masks_onehot = masks_onehot.permute(0, 3, 1, 2).contiguous().float()  # [B, M, Hm, Wm]
+
+        # Prepare per-level outputs
+        enhanced_feats = []
+
+        # Shared small MLPs / transform for prototypes & cross-attn
+        # we create lightweight modulators in-module to avoid global state
+        # prototype_dim default = channel of first feature or attn_hidden
+        C0 = feats[0].shape[1]
+        prototype_dim = prototype_dim or min(attn_hidden, C0)
+        # create small projection layers (bias-free for stability)
+        proj_proto = nn.Linear(C0, prototype_dim).to(device)
+        proj_query = nn.Linear(C0, prototype_dim).to(device)
+        proto_to_channel = nn.Linear(prototype_dim, C0).to(device)
+        # LayerNorms for stable training
+        ln_proto = nn.LayerNorm(prototype_dim).to(device)
+        ln_query = nn.LayerNorm(prototype_dim).to(device)
+
+        # Attention parameters (lightweight multi-head attention implemented manually)
+        # We'll implement a small cross-attention: prototypes (M) attend to pixel tokens (H*W)
+        # For efficiency we operate on reduced spatial resolution if needed.
+        def lightweight_cross_attn(proto_feats, query_tokens, num_heads=n_attn_heads):
+            # proto_feats: [B, M, D], query_tokens: [B, HW, D]
+            B, M, D = proto_feats.shape
+            _, HW, _ = query_tokens.shape
+            head_dim = D // num_heads
+            if head_dim == 0:
+                # fallback: single-head
+                q = proto_feats.unsqueeze(2)  # [B, M, 1, D]
+                k = query_tokens.unsqueeze(1) # [B, 1, HW, D]
+                attn = torch.einsum('bmnd,bkhd->bmnk', q, k)  # expensive shape fallback
+                # but we avoid this by forcing D multiple of heads externally
+            # project to queries/keys/values by small linear maps (use einsum-friendly)
+            # For speed use linear layers on last dim (we have small dims)
+            Wq = nn.Linear(D, D).to(device)
+            Wk = nn.Linear(D, D).to(device)
+            Wv = nn.Linear(D, D).to(device)
+            q = Wq(proto_feats)  # [B, M, D]
+            k = Wk(query_tokens) # [B, HW, D]
+            v = Wv(query_tokens) # [B, HW, D]
+            # reshape for heads
+            qh = q.view(B, M, num_heads, head_dim).permute(0,2,1,3)  # [B, H, M, Hd]
+            kh = k.view(B, HW, num_heads, head_dim).permute(0,2,1,3) # [B, H, HW, Hd]
+            vh = v.view(B, HW, num_heads, head_dim).permute(0,2,1,3) # [B, H, HW, Hd]
+            attn_scores = torch.matmul(qh, kh.transpose(-2, -1))  # [B, H, M, HW]
+            attn_scores = attn_scores / math.sqrt(head_dim + 1e-8)
+            attn_prob = F.softmax(attn_scores, dim=-1)  # softmax over HW
+            outh = torch.matmul(attn_prob, vh)  # [B, H, M, Hd]
+            out = outh.permute(0,2,1,3).contiguous().view(B, M, D)  # [B, M, D]
+            return out
+
+        # Channel attention (Squeeze-and-Excite style) helper
+        def channel_se(pool_proto, num_channels):
+            # pool_proto: [B, M, D_proto] -> produce [B, C] channel scaling
+            # Use a small MLP
+            x = pool_proto.mean(dim=1)  # [B, D_proto], average over M regions
+            fc1 = nn.Linear(x.shape[-1], max(8, x.shape[-1]//4)).to(device)
+            fc2 = nn.Linear(fc1.out_features, num_channels).to(device)
+            x = F.relu(fc1(x))
+            x = torch.sigmoid(fc2(x))  # [B, C]
+            return x.view(-1, num_channels, 1, 1)
+
+        # For each feature level
+        for feat in feats:
+            B, C, H, W = feat.shape
+            # step1: resize masks to feature size (nearest)
+            target_masks = F.interpolate(masks_onehot, size=(H, W), mode='nearest')  # [B, M, H, W]
+
+            # step2: multi-scale pooling (optional):
+            # we compute prototypes at original scale and optionally at pooled scales
+            prototypes = cls.my_masked_average_pooling(feat, target_masks)  # [B, M, C]
+            if multi_scale_pool:
+                # small pyramid: 1x1, 3x3 avgpool then masked pooling on downsampled features
+                # average-pool feature and masks then masked-average-pooling
+                feat_down = F.adaptive_avg_pool2d(feat, (H//2 if H//2>0 else 1, W//2 if W//2>0 else 1))
+                mask_down = F.adaptive_avg_pool2d(target_masks, (feat_down.shape[2], feat_down.shape[3]))
+                # binarize mask_down (threshold 0.5)
+                mask_down = (mask_down >= 0.5).float()
+                proto_down = cls.my_masked_average_pooling(feat_down, mask_down)  # [B, M, C]
+                # upsample proto_down via linear project and concat
+                prototypes = (prototypes + F.interpolate(proto_down, size=(prototypes.shape[2],), mode='nearest'))/2.0
+
+            # prototypes: [B, M, C]
+            # project prototypes to proto space and queries to proto space
+            p = prototypes  # [B, M, C]
+            p_proj = ln_proto(proj_proto(p)) if hasattr(proj_proto, 'weight') else proj_proto(p)  # [B, M, D]
+            # pixel tokens: flatten spatial dims
+            pixel_tokens = feat.view(B, C, H*W).permute(0,2,1).contiguous()  # [B, HW, C]
+            q_proj = ln_query(proj_query(pixel_tokens))  # [B, HW, D]
+
+            # cross-attention to enrich prototypes from query pixels (proto <- attn(pixel))
+            if use_cross_attn:
+                # Use lightweight cross-attention (proto attends to pixels)
+                proto_attn_enh = lightweight_cross_attn(p_proj, q_proj)  # [B, M, D]
+                # fuse: residual + small MLP
+                fuse_mlp = nn.Sequential(
+                    nn.Linear(proto_attn_enh.shape[-1], proto_attn_enh.shape[-1]).to(device),
+                    nn.ReLU(),
+                    nn.Linear(proto_attn_enh.shape[-1], proto_attn_enh.shape[-1]).to(device)
+                )
+                p_fused = p_proj + fuse_mlp(proto_attn_enh)  # [B, M, D]
+            else:
+                p_fused = p_proj
+
+            # map fused prototypes back to pixel space:
+            # Reconstruct feature per pixel as weighted sum of prototypes using target_masks
+            # First project prototypes back to C-channel (proto_to_channel)
+            proto_back = proto_to_channel(p_fused)  # [B, M, C]
+            # weight-sum via masks: proto_back (B, M, C) * mask (B, M, H, W) -> sum over M
+            # expand dims to multiply
+            proto_back = proto_back.permute(0,2,1).contiguous()  # [B, C, M]
+            mask_flat = target_masks.view(B, m, H*W)  # [B, M, HW]
+            # feature_sum = proto_back @ mask_flat  -> [B, C, HW]
+            feature_sum = torch.bmm(proto_back, mask_flat)  # [B, C, HW]
+            feature_sum = feature_sum.view(B, C, H, W)
+
+            # normalize by mask coverage
+            sum_mask = target_masks.sum(dim=1, keepdim=True)  # [B,1,H,W]
+            enhanced = feature_sum / (sum_mask + 1e-8)  # [B, C, H, W]
+
+            # channel attention from prototypes
+            if use_channel_attn:
+                ch_scale = channel_se(p_fused, C)  # [B, C, 1, 1]
+                enhanced = enhanced * ch_scale
+
+            # residual connection + learnable gate: y = x + g * enhanced
+            if gate_learnable:
+                # gate per-channel for stability. Initialize to zeros so early training ~ identity.
+                gate = nn.Parameter(torch.zeros(1, C, 1, 1)).to(device)
+                # apply
+                out = feat + gate * enhanced
+            else:
+                out = feat + enhanced
+
+            # optional normalization to keep statistics stable
+            out = F.layer_norm(out, out.shape[1:])  # layer-norm across (C,H,W) per sample
+
+            enhanced_feats.append(out)
+
+        return enhanced_feats
+
+    @staticmethod
+    def my_masked_average_pooling(feature, mask):
+        """
+        feature: [B, C, H, W]
+        mask: [B, M, H, W] (binary or soft)
+        returns: [B, M, C]
+        """
+        b, c, h, w = feature.shape
+        _, m, _, _ = mask.shape
+        _mask = mask.view(b, m, -1)  # [B, M, H*W]
+        _feature = feature.view(b, c, -1).permute(0, 2, 1).contiguous()  # [B, H*W, C]
+        # masked sum: (B, M, H*W) @ (B, H*W, C) -> (B, M, C)
+        feature_sum = torch.bmm(_mask, _feature)  # [B, M, C]
+        masked_sum = torch.sum(_mask, dim=2, keepdim=True)  # [B, M, 1]
+        masked_avg = feature_sum / (masked_sum + 1e-8)
+        return masked_avg
 
 class SegmentationHead_baseline(nn.Module):
     """
@@ -143,7 +524,6 @@ class CDModule(nn.Module):
         
         pass
     
-
     def interpolate_support_dims(self, hypercorr, spatial_size=None):
         bsz, ch, ha, wa, hb, wb = hypercorr.size()
         hypercorr = hypercorr.permute(0, 4, 5, 1, 2, 3).contiguous().view(bsz * hb * wb, ch, ha, wa)
@@ -169,10 +549,12 @@ class CDModule(nn.Module):
 
         bsz, ch, ha, wa, hb, wb = hypercorr_mix432.size()
         hypercorr_encoded = hypercorr_mix432.view(bsz, ch, ha, wa, -1).mean(dim=-1)
-        print("query_mask",query_mask)
+        #
+            
         if query_mask is not None:
             hypercorr_encoded = torch.concat([hypercorr_encoded, hypercorr_encoded], dim=1)
         else:
+            print("query_mask",query_mask)
             hypercorr_encoded = torch.concat([hypercorr_encoded, hypercorr_encoded], dim=1)
             pass
         #! SSblock
