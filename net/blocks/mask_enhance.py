@@ -3,7 +3,10 @@ import torch.nn.functional as F
 import torch.nn as nn
 
 def batch_cos_sim(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-
+    # calculate cosine similarity between a and b
+    # a: [batch,num_a,channel]
+    # b: [batch,num_b,channel]
+    # return: [batch,num_a,num_b]
     assert a.shape[0] == b.shape[0], 'batch size of a and b must be equal'
     assert a.shape[2] == b.shape[2], 'channel of a and b must be equal'
     cos_esp = 1e-8
@@ -13,10 +16,6 @@ def batch_cos_sim(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     cos_sim = cos_sim / (torch.bmm(a_norm, b_norm.permute(0, 2, 1)) + cos_esp)
     return cos_sim
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
 
 class GraphAttention(nn.Module):
     def __init__(self, h_dim=None):
@@ -24,20 +23,27 @@ class GraphAttention(nn.Module):
         self.with_projection = h_dim is not None
         if self.with_projection:
             self.linear = nn.Linear(h_dim, h_dim)
+            # self.linear_k = nn.Linear(h_dim, h_dim)
+            # self.linear_v = nn.Linear(h_dim, h_dim)
 
     def forward(self, q_node, k_node, v_node):
-        cos_esp = 1e-8
+        assert q_node.shape[0] == k_node.shape[0] and q_node.shape[
+            0] == v_node.shape[0]
+        assert k_node.shape[1] == v_node.shape[1]
+        assert q_node.shape[2] == k_node.shape[2]
+
         if self.with_projection:
             q_node = self.linear(q_node)
             k_node = self.linear(k_node)
             v_node = self.linear(v_node)
 
-        cos_sim = torch.bmm(q_node, k_node.permute(0, 2, 1))  # BxMxM
-        norm = (q_node.norm(dim=2, keepdim=True) @ k_node.norm(dim=2, keepdim=True).permute(0, 2, 1))
-        cos_sim = cos_sim / (norm + cos_esp)
-        edge_weight = cos_sim / (cos_sim.sum(dim=2, keepdim=True) + cos_esp)
-        return torch.bmm(edge_weight, v_node)
-
+        cos_sim = batch_cos_sim(q_node, k_node)
+        sum_sim = cos_sim.sum(dim=2, keepdim=True)
+        edge_weight = cos_sim / (sum_sim + 1e-8)
+        edge_feature = torch.bmm(edge_weight, v_node)
+        return edge_feature
+    
+    
 
 class MaskEnhancer(nn.Module):
     def __init__(self, feature_dims, init_weight=0.1):
@@ -113,22 +119,4 @@ class MaskEnhancer(nn.Module):
         feature_sum = _mask @ _feature  # BxMxC
         masked_sum = torch.sum(_mask, dim=2, keepdim=True)
         return feature_sum / (masked_sum + 1e-5)
-
-
-
-if __name__ == "__main__":
-    query_feats = [
-        torch.randn(2, 64, 32, 32),
-        torch.randn(2, 128, 16, 16),
-        torch.randn(2, 256, 8, 8)
-    ]
-    B, M, H, W = 2, 5, 32, 32
-    qry_sam_masks = torch.randint(0, 2, (B, M, H, W))
-
-
-    enhancer = MaskEnhancer([64, 128, 256], 0.5)
-
-    enhanced_feats = enhancer(query_feats, qry_sam_masks)
-
-    for i, ef in enumerate(enhanced_feats):
-        print(f"增强特征 {i} shape:", ef.shape)
+    

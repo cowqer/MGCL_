@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .modules import CenterPivotConv4d,SSblock
+from .modules import CenterPivotConv4d, SSblock
 import math
 from torchvision.models import resnet
 from torchvision.models import vgg
