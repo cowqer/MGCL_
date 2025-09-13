@@ -1,7 +1,85 @@
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
+import torch
 
+def priority_decay_masks(masks, decay=0.5):
+    """
+    优先级衰减策略处理重叠 mask
+    Args:
+        masks: [B, M, H, W]  输入 mask (0/1 二值化 或 [0,1] 概率值都行)
+        decay: float, 衰减系数 (0~1)，越小对大 mask 压制越强
+    Returns:
+        new_masks: [B, M, H, W]  衰减后的 mask
+    """
+    masks = masks.float()  # 
+    B, M, H, W = masks.shape
+    new_masks = torch.zeros_like(masks)
+
+    for b in range(B):
+        # 计算每个 mask 面积
+        areas = masks[b].sum(dim=(1, 2))  # [M]
+        # 按面积从大到小排序
+        sorted_idx = torch.argsort(areas, descending=True)
+
+        # 初始化一个已占用区域
+        occupied = torch.zeros((H, W), device=masks.device)
+
+        for rank, idx in enumerate(sorted_idx):
+            cur_mask = masks[b, idx]
+
+            # 找到和之前 mask 重叠的区域
+            overlap = (cur_mask > 0) & (occupied > 0)
+
+            # 在重叠区域衰减
+            adjusted_mask = cur_mask.clone()
+            adjusted_mask[overlap] = adjusted_mask[overlap] * decay  
+
+            # 累加到新 mask
+            new_masks[b, idx] = adjusted_mask
+
+            # 更新占用区域（这里不做硬覆盖，保留 soft 信息）
+            occupied = torch.maximum(occupied, adjusted_mask)
+
+    return new_masks
+def priority_decay_masks(masks, decay=0.5):
+    """
+    优先级衰减策略处理重叠 mask（向量化版本）
+    Args:
+        masks: [B, M, H, W] 输入 mask (0/1 二值化 或 [0,1] 概率值都行)
+        decay: float, 衰减系数 (0~1)，越小对大 mask 压制越强
+    Returns:
+        new_masks: [B, M, H, W] 衰减后的 mask
+    """
+    masks = masks.float()
+    B, M, H, W = masks.shape
+
+    # 计算面积并排序（大→小）
+    areas = masks.sum(dim=(2, 3))  # [B, M]
+    sorted_idx = torch.argsort(areas, descending=True, dim=1)  # [B, M]
+
+    # 按排序重排 mask
+    sorted_masks = torch.gather(
+        masks, 1, sorted_idx[:, :, None, None].expand(B, M, H, W)
+    )  # [B, M, H, W]
+
+    # 依次衰减（用累积最大值代替显式 overlap）
+    occupied = torch.zeros((B, H, W), device=masks.device)
+    new_sorted_masks = torch.zeros_like(sorted_masks)
+
+    for m in range(M):
+        cur_mask = sorted_masks[:, m]  # [B, H, W]
+        overlap = (cur_mask > 0) & (occupied > 0)
+        adjusted = cur_mask.clone()
+        adjusted[overlap] = adjusted[overlap] * decay
+        new_sorted_masks[:, m] = adjusted
+        occupied = torch.maximum(occupied, adjusted)
+
+    # 按原顺序还原
+    new_masks = torch.zeros_like(new_sorted_masks)
+    new_masks.scatter_(1, sorted_idx[:, :, None, None].expand(B, M, H, W), new_sorted_masks)
+
+    return new_masks
 def batch_cos_sim(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     # calculate cosine similarity between a and b
     # a: [batch,num_a,channel]
