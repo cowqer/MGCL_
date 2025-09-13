@@ -517,19 +517,13 @@ class SegmentationHead_FBC_3_v5(SegmentationHead):
 
             # print("query_mask", query_mask.shape) # [16, 128, 256, 256]
             # print("support_label", support_label.shape) # [16, 256, 256]
-            #!#################MASK_ENHACE_BEGIN###################
-            
-            #!#################MASK_ENHANCE_END####################
             
             #!#################FGE BEGIN###################
             label = support_label.unsqueeze(1)  # [B,1,H0,W0]
             feat = support_feats[2]  # shape: [16, 2048, 8, 8]取高维信息作为先验输入
             
-            proto_fg = masked_avg_pool(feat, label)            # 前景 prototype: [16, 2048]
-            proto_bg = masked_avg_pool(feat, 1 - label)        # 背景 prototype: [16, 2048]
-            
-            support_prototypes_fg = proto_fg
-            support_prototypes_bg = proto_bg
+            support_prototypes_fg = masked_avg_pool(feat, label)            # 前景 prototype: [16, 2048]
+            support_prototypes_bg = masked_avg_pool(feat, 1 - label)        # 背景 prototype: [16, 2048]
             
             query_feat_2 = query_feats[2]  # 取最后一层特征
             support_feat_2 = support_feats[2]  # 取最后一层特征
@@ -563,8 +557,6 @@ class SegmentationHead_FBC_3_v5(SegmentationHead):
                                     dim=1) for fg_one, bg_one in zip(corr_fg, corr_bg)]
 
             # MGCD
-            # --- 假设你在前面已经得到了 corr（用于 mgcd）并计算出 coarse_logit ---
-            # 先计算第一次（coarse）logit（你的原实现）
             coarse_logit = self.mgcd(corr[::-1], query_mask)   # [B, 2, Hq, Wq] 假设二分类 (bg, fg)
 
             # 将 coarse_logit 当作 pseudo mask 的来源
@@ -573,9 +565,9 @@ class SegmentationHead_FBC_3_v5(SegmentationHead):
             pseudo_fg_prob = coarse_prob[:, 1:2, :, :]         # [B,1,Hq,Wq]
 
             # 1) 计算 query 伪前景原型 (伪原型)
-            # 使用 query_feats[2]（低分辨率特征）生成伪原型；若需要可上/下采样以匹配 feat 尺度
+
             query_feat_for_pool = query_feats[2]               # [B, C, h, w]
-            # 若 coarse_logit 与 query_feat 尺度不一致，请先下采样/上采样 pseudo_fg_prob
+
             if pseudo_fg_prob.shape[2:] != query_feat_for_pool.shape[2:]:
                 pseudo_fg_resized = F.interpolate(pseudo_fg_prob, size=query_feat_for_pool.shape[2:], mode='bilinear', align_corners=False)
             else:
@@ -624,7 +616,6 @@ class SegmentationHead_FBC_3_v5(SegmentationHead):
             corr = [torch.concatenate([fg_one[:, None], bg_one[:, None]], dim=1) for fg_one, bg_one in zip(corr_fg, corr_bg)]
 
             refined_logit = self.mgcd(corr[::-1], query_mask)  # 最终输出
-
 
             return coarse_logit, refined_logit
 
@@ -865,6 +856,36 @@ class MG_FBC_3_v5Network(MGCLNetwork):
         coarse_logit = F.interpolate(coarse_logit, support_img.size()[2:], mode='bilinear', align_corners=True)
         refined_logit = F.interpolate(refined_logit, support_img.size()[2:], mode='bilinear', align_corners=True)
         return coarse_logit, refined_logit 
+    
+    def predict_nshot(self, batch):
+        nshot = batch["support_imgs"].shape[1]
+        logit_label_agg = 0
+        for s_idx in range(nshot):
+            coarse_logit, refined_logit = self.forward(
+                batch['query_img'], batch['support_imgs'][:, s_idx],  batch['support_labels'][:, s_idx],
+                query_mask=batch['query_mask'] if 'query_mask' in batch and self.args.mask else None,
+                support_masks=batch['support_masks'][:, s_idx] if 'support_masks' in batch and self.args.mask else None)
+            # alpha = 0.5  # 可以调节，取值范围 [0,1]
+            # logit_label = alpha * coarse_logit + (1 - alpha) * refined_logit
+            logit_label = refined_logit
+            result_i = logit_label.argmax(dim=1).clone()
+            logit_label_agg += result_i
+
+            # One-Shot
+            if nshot == 1: return result_i.float()
+            pass
+
+        # Few-Shot
+        # Average & quantize predictions given threshold (=0.5)
+        bsz = logit_label_agg.size(0)
+        max_vote = logit_label_agg.view(bsz, -1).max(dim=1)[0]
+        max_vote = torch.stack([max_vote, torch.ones_like(max_vote).long()])
+        max_vote = max_vote.max(dim=0)[0].view(bsz, 1, 1)
+        pred_label = logit_label_agg.float() / max_vote
+        threshold = 0.4
+        pred_label[pred_label < threshold] = 0
+        pred_label[pred_label >= threshold] = 1
+        return pred_label
     
 class MGCD_v1Network(MGCLNetwork):
     """
