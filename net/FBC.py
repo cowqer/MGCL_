@@ -573,7 +573,20 @@ class SegmentationHead_FBC_3_v5(SegmentationHead):
             else:
                 pseudo_fg_resized = pseudo_fg_prob
 
-            pseudo_query_proto = weighted_masked_avg_pool(query_feat_for_pool, pseudo_fg_resized)  # [B, C]
+          # confidence filtering
+            conf_thresh = 0.7
+            conf_mask = (pseudo_fg_resized > conf_thresh).float()
+            pseudo_fg_filtered = pseudo_fg_resized * conf_mask
+
+            # normalize to avoid all-zero
+            norm = pseudo_fg_filtered.sum(dim=(2,3), keepdim=True) + 1e-6
+            pseudo_fg_filtered = pseudo_fg_filtered / norm
+
+            # detach to avoid gradient flow back to coarse
+            pseudo_fg_filtered = pseudo_fg_filtered.detach()
+  
+            
+            pseudo_query_proto = weighted_masked_avg_pool(query_feat_for_pool, pseudo_fg_filtered)  # [B, C]
 
             # 2) 准备 support 原型（你之前计算得到 support_prototypes_fg）
             # support_prototypes_fg 可能是 [B, C]（K=1）或 [B, K, C]
@@ -597,7 +610,8 @@ class SegmentationHead_FBC_3_v5(SegmentationHead):
             # support_proto_k: [B, K, C], affinity: [B, K]
             affinity_exp = affinity.unsqueeze(-1)                               # [B,K,1]
             rectified_proto = (support_proto_k * affinity_exp).sum(dim=1)       # [B, C]
-
+            rectified_proto = rectified_proto.detach()  # 不反传梯度
+            
             # 5) 用 rectified_proto 替换原先用于匹配的 support prototype，重做一次 FGE / 后续流程
             # 将 rectified_proto 注入到原来 prototype 生成功能里（扩展并加到 feature）
             rectified_proto_spatial = rectified_proto.unsqueeze(-1).unsqueeze(-1)  # [B,C,1,1]

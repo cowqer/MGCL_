@@ -10,6 +10,8 @@ import datetime
 import os
 import shutil
 
+weight = 0.1
+
 def load_yaml_config(yaml_path):
     with open(yaml_path, 'r') as f:
         cfg = yaml.safe_load(f)
@@ -78,6 +80,7 @@ class Runner(object):
             Logger.tbd_writer.add_scalars('data/fb_iou', {'train_fb_iou': train_fb_iou, 'val_fb_iou': val_fb_iou}, epoch)
             Logger.tbd_writer.flush()
         Logger.tbd_writer.close()
+        Logger.info('weight set to :', {'weight':weight}, epoch)
         Logger.info('==================== Finished Training ====================')
 
     def train_one_epoch(self, epoch, dataloader):
@@ -93,7 +96,7 @@ class Runner(object):
                                    support_masks=batch['support_masks'].squeeze(1) if 'support_masks' in batch else None)
                 loss1 = self.model.compute_objective(coarse_logit, batch['query_label'])
                 loss2 = self.model.compute_objective(refined_logit, batch['query_label'])
-                loss = 0.5 * loss1 + loss2
+                loss = weight * loss1 + loss2
             # AMP 反向
             self.scaler.scale(loss).backward()
             self.scaler.step(self.optimizer)
@@ -121,7 +124,7 @@ class Runner(object):
                                    support_masks=batch['support_masks'].squeeze(1) if 'support_masks' in batch else None)
                 loss1 = self.model.compute_objective(refined_logit, batch['query_label'])
                 loss2 = self.model.compute_objective(coarse_logit, batch['query_label'])
-                loss = 0.5*loss1 + loss2
+                loss = weight * loss1 + loss2
                 
             pred = refined_logit.argmax(dim=1)
             area_inter, area_union = Evaluator.classify_prediction(pred, batch)
