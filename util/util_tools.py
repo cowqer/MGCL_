@@ -352,11 +352,24 @@ class Logger:
         r""" Writes log message to log.txt """
         logging.info(msg)
 
+    # @classmethod
+    # def save_model_miou(cls, model, epoch, val_miou):
+    #     torch.save(model.state_dict(), os.path.join(cls.logpath, 'best_model.pt'))
+    #     cls.info('Model saved @%d w/ val. mIoU: %5.2f.\n' % (epoch, val_miou))
     @classmethod
     def save_model_miou(cls, model, epoch, val_miou):
-        torch.save(model.state_dict(), os.path.join(cls.logpath, 'best_model.pt'))
-        cls.info('Model saved @%d w/ val. mIoU: %5.2f.\n' % (epoch, val_miou))
+        # 文件名带上 epoch
+        filename = f"best_{epoch}e.pt"
+        save_path = os.path.join(cls.logpath, filename)
 
+        # 删除已有的 best_xxe.pt（避免堆一堆 best 文件）
+        for f in os.listdir(cls.logpath):
+            if f.startswith("best_") and f.endswith(".pt"):
+                os.remove(os.path.join(cls.logpath, f))
+
+        # 保存新的 best
+        torch.save(model.state_dict(), save_path)
+        cls.info('Best model updated -> epoch: %d | val. mIoU: %5.2f | file: %s\n' % (epoch, val_miou, filename))
     @classmethod
     def log_params(cls, model):
         backbone_param = 0

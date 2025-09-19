@@ -227,8 +227,11 @@ class RunnerSAMForExtractingMask(object):#主执行类，负责生成并保存�
                     result_path = Tools.new_dir(result_path)
                     Image.fromarray(np.asarray(image, dtype=np.uint8)).save(
                         os.path.join(result_path, "0_image.jpg"))
-                    Image.fromarray(np.asarray(label * (255 // 15), dtype=np.uint8)).save(
-                        os.path.join(result_path, "0_label.png"))
+                    # Image.fromarray(np.asarray(label * (255 // 15), dtype=np.uint8)).save(
+                    #     os.path.join(result_path, "0_label.png"))
+                    Image.fromarray(label.astype(np.uint8)).save(
+                    os.path.join(result_path, "0_label.png"))
+
 
                     for index, ann in enumerate(masks):
                         resul_file = os.path.join(result_path, f"{index+1}.bmp")
@@ -248,5 +251,6 @@ class RunnerSAMForExtractingMask(object):#主执行类，负责生成并保存�
 
 if __name__ == '__main__':
     runner = RunnerSAMForExtractingMask(is_dao=False, split="train")
-    runner.runner_1_extracted_mask(result_mask_name=Config.data_sam_mask_name)
+    # runner.runner_1_extracted_mask(result_mask_name=Config.data_sam_mask_name)
+    runner.runner_2_vis_mask(mask_path='/data/seekyou/Data/lcml+data/I+L/sam_mask_vit_h_t64_p32_s50/mining06.pkl', result_path='./vis')
     pass
