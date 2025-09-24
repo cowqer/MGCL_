@@ -1,3 +1,6 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 import torch 
 import argparse
 from torch import amp
@@ -40,6 +43,7 @@ class Runner(object):
         net_cls = globals()[self.args.net_name] if hasattr(self.args, "net_name") else myNetwork
         self.model = net_cls(args).to(self.device)
         self.optimizer = MyOptim.get_finetune_optimizer(args, self.model)
+        
         Logger.info("Model architecture:\n{}".format(self.model))
         FSSDataset.initialize(img_size=args.img_size, datapath=args.datapath)
         self.dataloader_train = FSSDataset.build_dataloader(
@@ -52,7 +56,7 @@ class Runner(object):
         shutil.copy(os.path.join("net", "baseline_.py"), os.path.join(args.loggerpath, "baseline_.py"))
         Logger.log_params(self.model)
 
-        # 初始化 GradScaler
+        # 初始�?GradScaler
         self.scaler = amp.GradScaler("cuda")
 
     def train(self):
@@ -80,7 +84,8 @@ class Runner(object):
             Logger.tbd_writer.add_scalars('data/fb_iou', {'train_fb_iou': train_fb_iou, 'val_fb_iou': val_fb_iou}, epoch)
             Logger.tbd_writer.flush()
         Logger.tbd_writer.close()
-        Logger.info('weight set to :', {'weight':weight}, epoch)
+        Logger.info(f"weight set to : {weight}")
+
         Logger.info('==================== Finished Training ====================')
 
     def train_one_epoch(self, epoch, dataloader):

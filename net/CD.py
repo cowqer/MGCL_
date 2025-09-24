@@ -851,7 +851,7 @@ class MCDModule(nn.Module):
         self.decoder1 = nn.Sequential(
             nn.Conv2d(outch4, outch3, (3, 3), padding=(1, 1), bias=True), nn.ReLU(),
             nn.Conv2d(outch3, outch2, (3, 3), padding=(1, 1), bias=True), nn.ReLU())
-        #! 别删 之前训练的有部分初始化了这段 评估报错就取消这个注释
+
         self.decoder2 = nn.Sequential(
             nn.Conv2d(outch2, outch1, (3, 3), padding=(1, 1), bias=True), nn.ReLU(),
             nn.Conv2d(outch1, 2, (3, 3), padding=(1, 1), bias=True))

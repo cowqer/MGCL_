@@ -504,6 +504,7 @@ class SegmentationHead_FBC_3_v5(SegmentationHead):
         super().__init__()
         # self.mgcd = MGCDModule([2, 2, 2])
         self.mgcd = SSCDModule_v1([2, 2, 2])
+        self.mgcd_refine = SSCDModule_v1([2, 2, 2])
         self.alpha = nn.Parameter(torch.tensor(0.0))  # 初始为 0，经sigmoid后为0.5
         self.beta = nn.Parameter(torch.tensor(0.0))
 
@@ -572,7 +573,7 @@ class SegmentationHead_FBC_3_v5(SegmentationHead):
                 pseudo_fg_resized = F.interpolate(pseudo_fg_prob, size=query_feat_for_pool.shape[2:], mode='bilinear', align_corners=False)
             else:
                 pseudo_fg_resized = pseudo_fg_prob
-
+            # 对由 coarse_logit 生成的伪前景 mask 进行过滤和归一化
           # confidence filtering
             conf_thresh = 0.7
             conf_mask = (pseudo_fg_resized > conf_thresh).float()
@@ -584,8 +585,7 @@ class SegmentationHead_FBC_3_v5(SegmentationHead):
 
             # detach to avoid gradient flow back to coarse
             pseudo_fg_filtered = pseudo_fg_filtered.detach()
-  
-            
+
             pseudo_query_proto = weighted_masked_avg_pool(query_feat_for_pool, pseudo_fg_filtered)  # [B, C]
 
             # 2) 准备 support 原型（你之前计算得到 support_prototypes_fg）
@@ -629,8 +629,9 @@ class SegmentationHead_FBC_3_v5(SegmentationHead):
             corr_bg = self.multilayer_correlation(query_feats, support_feats_bg)
             corr = [torch.concatenate([fg_one[:, None], bg_one[:, None]], dim=1) for fg_one, bg_one in zip(corr_fg, corr_bg)]
 
-            refined_logit = self.mgcd(corr[::-1], query_mask)  # 最终输出
-
+            refined_logit = self.mgcd_refine(corr[::-1], query_mask)  # 最终输出
+            # diff = refined_logit - coarse_logit
+            # print("logit_diff_mean:", (refined_logit - coarse_logit).abs().mean().item())
             return coarse_logit, refined_logit
 
 class SegmentationHead_FBC_3_MGCD_v1(SegmentationHead):
@@ -702,17 +703,12 @@ class SegmentationHead_FBC_3_MGCD_v2(SegmentationHead):
             
             label = support_label.unsqueeze(1)  # [B,1,H0,W0]
 
-            feat = support_feats[2]  # shape: [16, 2048, 8, 8]
+            support_feat_2 = support_feats[2]  # shape: [16, 2048, 8, 8]
+            query_feat_2 = query_feats[2] 
             
-            proto_fg = masked_avg_pool(feat, label)            # 前景 prototype: [16, 2048]
-            proto_bg = masked_avg_pool(feat, 1 - label)        # 背景 prototype: [16, 2048]
+            support_prototypes_fg = masked_avg_pool(support_feat_2, label)            # 前景 prototype: [16, 2048]
+            support_prototypes_bg = masked_avg_pool(support_feat_2, 1 - label)        # 背景 prototype: [16, 2048]
 
-            support_prototypes_fg = proto_fg
-            support_prototypes_bg = proto_bg
-
-            query_feat_2 = query_feats[2]  # 取最后一层特征
-            support_feat_2 = support_feats[2]  # 取最后一层特征
-            
             alpha = 0.5
             beta = 1.0 - alpha
 
@@ -881,7 +877,7 @@ class MG_FBC_3_v5Network(MGCLNetwork):
                 support_masks=batch['support_masks'][:, s_idx] if 'support_masks' in batch and self.args.mask else None)
             # alpha = 0.5  # 可以调节，取值范围 [0,1]
             # logit_label = alpha * coarse_logit + (1 - alpha) * refined_logit
-            logit_label = refined_logit
+            logit_label = coarse_logit
             result_i = logit_label.argmax(dim=1).clone()
             logit_label_agg += result_i
 
